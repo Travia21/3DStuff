@@ -9,9 +9,6 @@ var gl;
 /** @type {WebGLProgram} */
 var shaderProgram;
 
-/** @type {boolean} */
-var animating;
-
 /** @type {WebGLBuffer} */
 var triangleColorVBO, trianglePositionVBO;
 
@@ -119,8 +116,14 @@ function drawTriangles() {
 /** @type {Date} */
 var now;
 
+/** @type {boolean} */
+var animating;
+
 /** @type {Number} */
 var frameTime;
+
+/** @type {HTMLElement} */
+var fpsSlider;
 
 /** @type {Number} */
 var lastT, dT;
@@ -130,6 +133,7 @@ var lastT, dT;
  * 
  */
 async function animate() {
+    frameTime = fpsSlider.value * -1 + 1000;
     dT = now.getMilliseconds() - lastT;
     lastT = now.getMilliseconds();
     if (dT < frameTime) { // 1 second
@@ -151,7 +155,6 @@ function handleButtons() {
 }
 
 /**
- * 
  * @param {String} vertexSource 
  * @param {String} fragmentSource 
  */
@@ -213,9 +216,10 @@ function initGL(vertexShaderSource, fragmentShaderSource) {
 
     compileAndLink(vertexShaderSource, fragmentShaderSource);
 
-    frameTime = 1000;
     lastT = now.getMilliseconds() - frameTime; // ensure the first iteration doesn't wait
     animating = true;
+    fpsSlider = document.getElementById('fps-slider');
+
     defineTriangleBuffers();
     defineElementalTriangle();
     animate();
