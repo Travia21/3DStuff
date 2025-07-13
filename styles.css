@@ -1,0 +1,34 @@
+/* This CSS was definitely helped by AI. It's been a long time since I did web dev. */
+
+html,
+body {
+    margin: 0;
+    height: 100%;
+    overflow: hidden;
+}
+
+/*
+body {
+    display: flex;
+    flex-direction: column;
+}
+*/
+
+canvas {
+    display: block;
+}
+
+#controls-holder {
+    padding: 0;
+    background: #eeeeee;
+    flex: 0 0 auto;
+}
+
+/*
+#glcanvas {
+    flex: 1 1 auto;
+    width: 100%;
+    height: 100%;
+    display: block;
+}
+*/
