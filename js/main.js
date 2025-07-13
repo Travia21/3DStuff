@@ -1,12 +1,5 @@
 "use strict";
 
-/**
- * Vite method for getting text from files
- * Putting the text in GLSL files allows my LSPs to help me with syntax
- */
-import vertexShaderSource from '../shaders/vertexShader.glsl?raw'
-import fragmentShaderSource from '../shaders/fragmentShader.glsl?raw'
-
 // I much prefer working with types, even if they are annotations
 var canvas = /** @type {HTMLCanvasElement} */ document.getElementById("webglcanvas");
 
@@ -27,6 +20,15 @@ var colorAttribLoc, positionAttribLoc;
 
 /** @type {Float32Array} */
 var translation;
+
+/**
+ * Load in the vertex and fragment shader's source
+ */
+async function loadShaderText(path) {
+    const resource = await fetch(path);
+    if (!resource.ok) { throw new Error(resource.statusText); }
+    return await resource.text();
+}
 
 function defineTranslation(/** @type {float} */ dx, /** @type {float} */ dy) {
     translation = new Float32Array([dx, dy]);
@@ -155,6 +157,7 @@ function handleButtons() {
  */
 function compileAndLink(vertexSource, fragmentSource) {
     let vertexShader = /** @type {WebGLShader} */ gl.createShader(gl.VERTEX_SHADER);
+
     gl.shaderSource(vertexShader, vertexSource);
     gl.compileShader(vertexShader);
 
@@ -187,13 +190,15 @@ function compileAndLink(vertexSource, fragmentSource) {
         console.error("Error validating the shader program: ", gl.getProgramInfoLog(shaderProgram));
         return;
     }
+
+    console.log("Something else");
 }
 
 function resize() {
     gl.viewport(0, 0, canvas.clientWidth, canvas.clientHeight);
 }
 
-function initGL() {
+function initGL(vertexShaderSource, fragmentShaderSource) {
     now = new Date();
     window.addEventListener('resize', resize);
     resize();
@@ -216,7 +221,7 @@ function initGL() {
     animate();
 }
 
-function init() {
+async function init() {
     try {
         canvas = document.getElementById('webglcanvas');
         let canvas_options = {
@@ -236,7 +241,9 @@ function init() {
         return;
     }
 
-    initGL();
+    const vertexShaderSource = await loadShaderText("../shaders/vertexShader.glsl");
+    const fragmentShaderSource = await loadShaderText("../shaders/fragmentShader.glsl");
+    initGL(vertexShaderSource, fragmentShaderSource);
 }
 
 window.onload = init;
