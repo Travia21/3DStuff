@@ -241,8 +241,8 @@ async function init() {
         return;
     }
 
-    const vertexShaderSource = await loadShaderText("../shaders/vertexShader.glsl");
-    const fragmentShaderSource = await loadShaderText("../shaders/fragmentShader.glsl");
+    const vertexShaderSource = await loadShaderText("./shaders/vertexShader.glsl");
+    const fragmentShaderSource = await loadShaderText("./shaders/fragmentShader.glsl");
     initGL(vertexShaderSource, fragmentShaderSource);
 }
 
