@@ -113,20 +113,17 @@ function drawTriangles() {
     }
 }
 
-/** @type {Date} */
-var now;
-
 /** @type {boolean} */
 var animating;
 
+/** @type {Date} */
+var now;
+
 /** @type {Number} */
-var frameTime;
+var frameTime, dT, lastT;
 
 /** @type {HTMLElement} */
 var fpsSlider;
-
-/** @type {Number} */
-var lastT, dT;
 
 /**
  * Animation handling function
