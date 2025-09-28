@@ -6,8 +6,6 @@
  */
 //import vertexShaderSource from '../shaders/vertexShader.glsl?raw'
 //import fragmentShaderSource from '../shaders/fragmentShader.glsl?raw'
-var vertexShaderSource;
-var fragmentShaderSource;
 
 // I much prefer working with types, even if they are annotations
 var canvas = /** @type {HTMLCanvasElement} */ document.getElementById("webglcanvas");
@@ -287,7 +285,7 @@ function resize() {
     gl.viewport(0, 0, canvas.clientWidth, canvas.clientHeight);
 }
 
-function initGL() {
+function initGL(vertexShaderSource, fragmentShaderSource) {
     now = new Date();
     window.addEventListener('resize', resize);
     resize();
@@ -335,9 +333,9 @@ async function init() {
         return;
     }
 
-    vertexShaderSource = await loadShaderText("./shaders/vertexShader.glsl");
-    fragmentShaderSource = await loadShaderText("./shaders/fragmentShader.glsl");
-    initGL();
+    const vertexShaderSource = await loadShaderText("./shaders/vertexShader.glsl");
+    const fragmentShaderSource = await loadShaderText("./shaders/fragmentShader.glsl");
+    initGL(vertexShaderSource, fragmentShaderSource);
 }
 
 window.onload = init;
