@@ -124,8 +124,8 @@ function drawTexturedTriangles() {
     //gl.bindBuffer(gl.ARRAY_BUFFER, triangleColorVBO);
     //gl.vertexAttribPointer(colorAttribLoc, 4, gl.FLOAT, false, 0, 0);
 
-    const imageURL = new URL("../static/unnamed.jpg", import.meta.url).href;
-    let image = new Image();
+    const imageURL = new URL("static/unnamed.jpg", document.baseURI).href;
+    const image = new Image();
     image.src = imageURL;
 
     let tex1 = gl.createTexture();
