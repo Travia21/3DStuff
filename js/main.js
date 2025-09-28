@@ -335,8 +335,8 @@ async function init() {
         return;
     }
 
-    vertexShaderSource = await loadShaderText("../shaders/vertexShader.glsl");
-    fragmentShaderSource = await loadShaderText("../shaders/fragmentShader.glsl");
+    vertexShaderSource = await loadShaderText("./shaders/vertexShader.glsl");
+    fragmentShaderSource = await loadShaderText("./shaders/fragmentShader.glsl");
     initGL();
 }
 
