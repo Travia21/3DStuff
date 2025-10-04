@@ -6,6 +6,8 @@
  */
 //import vertexShaderSource from '../shaders/vertexShader.glsl?raw'
 //import fragmentShaderSource from '../shaders/fragmentShader.glsl?raw'
+var vertexShaderSource;
+var fragmentShaderSource;
 
 // I much prefer working with types, even if they are annotations
 var canvas = /** @type {HTMLCanvasElement} */ document.getElementById("webglcanvas");
@@ -25,17 +27,72 @@ var colorAttribLoc, positionAttribLoc;
 /** @type {Float32Array} */
 var translation;
 
-function defineTranslation(/** @type {float} */ dx, /** @type {float} */ dy) {
-    translation = new Float32Array([dx, dy]);
-    let translationUniformLocation = gl.getUniformLocation(shaderProgram, 'translation');
-
-    gl.uniform2fv(translationUniformLocation, translation);
+function translate(/** @type {float} */ dx, /** @type {float} */ dy) {
+    const translation_loc = gl.getUniformLocation(shaderProgram, "translation");
+    const translation_dat = new Float32Array([
+        1.0, 0.0, dx,
+        0.0, 1.0, dy,
+        0.0, 0.0, 1.0
+    ]);
+    gl.uniformMatrix3fv(translation_loc, false, translation_dat);
 }
 
-/**
- * Main drawing function
- */
-function defineTriangleBuffers() {
+function rotate(/** @type {float} */ degrees) {
+    const transformMat_loc = gl.getUniformLocation(shaderProgram, "transformMat");
+    const transformMat_dat = new Float32Array([
+        Math.cos(degrees), -Math.sin(degrees), 0.0,
+        Math.sin(degrees), Math.cos(degrees), 0.0,
+        0.0, 0.0, 1.0,
+    ]);
+    gl.uniformMatrix3fv(transformMat_loc, false, transformMat_dat);
+}
+
+function loadTextures() {
+    // magenta PLACEHOLDER
+    const texPlaceholder = gl.createTexture();
+    gl.activeTexture(gl.TEXTURE9);
+    gl.bindTexture(gl.TEXTURE_2D, texPlaceholder);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, 1, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE,
+        new Uint8Array([255,0,255,255]));
+    // end PLACEHOLDER
+
+    gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true); // flip vertically
+
+    const meURL = new URL("static/unnamed.jpg", document.baseURI).href;
+    const cloverURL = new URL("static/Clover_teeth_removed_cropped.jpg", document.baseURI).href;
+
+    const texMe = gl.createTexture();
+    gl.activeTexture(gl.TEXTURE0);
+    loadImage(meURL, texMe);
+
+    const texClover = gl.createTexture();
+    gl.activeTexture(gl.TEXTURE1); // activate texture unit 0
+    loadImage(cloverURL, texClover); // load the image into the texture object
+}
+
+function loadImage(/** @type {URL} */ url, /** @type {WebGLTexture} */ textureObject) {
+    const image = new Image();
+    const texUnit = gl.getParameter(gl.ACTIVE_TEXTURE);
+
+    image.onload = function() {
+        gl.activeTexture(texUnit);
+        gl.bindTexture(gl.TEXTURE_2D, textureObject);
+        try {
+            gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, image);
+            gl.generateMipmap(gl.TEXTURE_2D); // only with Po2
+            console.log(
+                "width: ", image.width,
+                " height: ", image.height,
+                " texUnit: ", gl.getParameter(gl.ACTIVE_TEXTURE) - gl.TEXTURE0);
+        } catch (e) {
+            console.log(e);
+        }
+    };
+
+    image.src = url;
+}
+
+function defineBasicTriangle() {
     /*
     colorAttribLoc = gl.getAttribLocation(shaderProgram, 'color');
     gl.enableVertexAttribArray(colorAttribLoc);
@@ -43,23 +100,13 @@ function defineTriangleBuffers() {
     positionAttribLoc = gl.getAttribLocation(shaderProgram, 'position');
     gl.enableVertexAttribArray(positionAttribLoc);
 
-    let redderAttribLoc = gl.getAttribLocation(shaderProgram, 'redder');
+    const redderAttribLoc = gl.getAttribLocation(shaderProgram, 'redder');
     gl.vertexAttrib1f(redderAttribLoc, 0.1);
-
-    // Color set here
-    triangleColorVBO = gl.createBuffer();
-    gl.bindBuffer(gl.ARRAY_BUFFER, triangleColorVBO);
-    let triangleColors = new Float32Array([
-        1.0, 0.0, 0.0, 0.9,
-        0.0, 1.0, 0.0, 0.9,
-        0.0, 0.0, 1.0, 0.9
-    ]);
-    gl.bufferData(gl.ARRAY_BUFFER, triangleColors, gl.STATIC_DRAW);
 
     trianglePositionVBO = gl.createBuffer();
     gl.bindBuffer(gl.ARRAY_BUFFER, trianglePositionVBO);
     // these are in clip coordinates
-    let triangleVertices = new Float32Array([
+    const triangleVertices = new Float32Array([
         -1.0, 0.7,
         -0.7, 0.7,
         -0.85, 1.0
@@ -69,128 +116,105 @@ function defineTriangleBuffers() {
 
 var triangleIFSVBO;
 var triangleIFSPosVBO;
+var totalTriangles = 1000;
 /**
  * The same triangle with different vertex color ordering.
  */
-function defineElementalTriangle() {
+function defineTriangleShape() {
     triangleIFSVBO = gl.createBuffer();
     triangleIFSPosVBO = gl.createBuffer();
 
     gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, triangleIFSVBO);
-    let indexedFaceSet = new Uint8Array([1, 2, 0]);
-    gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, indexedFaceSet, gl.STREAM_DRAW);
+    const indexedFaceSet = new Uint8Array([0, 1, 2]);
+    gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, indexedFaceSet, gl.STATIC_DRAW);
 
-    let triangleVertices = new Float32Array([
-        -0.55, 1.0, // 0 last
-        -0.7, 0.7,  // 1 first
-        -0.4, 0.7   // 2 middle
-    ]);
     gl.bindBuffer(gl.ARRAY_BUFFER, triangleIFSPosVBO);
+    const triangleVertices = new Float32Array([
+        -0.7, 0.7,
+        -0.4, 0.7,
+        -0.55, 1.0
+    ]);
     gl.bufferData(gl.ARRAY_BUFFER, triangleVertices, gl.STATIC_DRAW);
 }
 
-function drawTriangles() {
-    gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
-    gl.useProgram(shaderProgram);
+function drawSampleTriangle() {
+    const sampler_loc = gl.getUniformLocation(shaderProgram, "u_texture");
+    gl.uniform1i(sampler_loc, 0);
+}
 
+function drawBasicTriangles() {
     gl.bindBuffer(gl.ARRAY_BUFFER, trianglePositionVBO);
     gl.vertexAttribPointer(positionAttribLoc, 2, gl.FLOAT, false, 0, 0);
 
     gl.bindBuffer(gl.ARRAY_BUFFER, triangleColorVBO);
+    const triangleColors = new Float32Array([
+        1.0, 0.0, 0.0, 0.9,
+        0.0, 1.0, 0.0, 0.9,
+        0.0, 0.0, 1.0, 0.9
+    ]);
+    gl.bufferData(gl.ARRAY_BUFFER, triangleColors, gl.STATIC_DRAW);
     gl.vertexAttribPointer(colorAttribLoc, 4, gl.FLOAT, false, 0, 0);
 
-    defineTranslation(0.0, 0.0);
+    translate(0.0, 0.0);
     gl.drawArrays(gl.TRIANGLES, 0, 3);
 
     gl.bindBuffer(gl.ARRAY_BUFFER, triangleIFSPosVBO);
     gl.vertexAttribPointer(positionAttribLoc, 2, gl.FLOAT, false, 0, 0);
     gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, triangleIFSVBO);
 
-    for (let i = 0; i < 100; i++) {
-        let dx = Math.random() * 1.43;
-        let dy = Math.random() * -1.7;
-        defineTranslation(dx, dy);
+    for (let i = 0; i < totalTriangles; i++) {
+        const dx = Math.random() * 1.4;
+        const dy = Math.random() * -1.7;
+        translate(dx, dy);
         gl.drawElements(gl.TRIANGLES, 3, gl.UNSIGNED_BYTE, 0);
     }
 }
 
+
+/**
+ * Some of this needs to be split out into other functions
+ */
 function drawTexturedTriangles() {
-    gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
-    gl.useProgram(shaderProgram);
+    // set sampler to texture unit 0
+    const sampler_loc = gl.getUniformLocation(shaderProgram, "u_texture");
+
+    // I need a way to keep track of the current transformation matrix.
+    rotate(0);
 
     gl.bindBuffer(gl.ARRAY_BUFFER, trianglePositionVBO);
     gl.vertexAttribPointer(positionAttribLoc, 2, gl.FLOAT, false, 0, 0);
 
-    //gl.bindBuffer(gl.ARRAY_BUFFER, triangleColorVBO);
-    //gl.vertexAttribPointer(colorAttribLoc, 4, gl.FLOAT, false, 0, 0);
+    // UV attribute
+    const tex_coords_loc = gl.getAttribLocation(shaderProgram, "tex_coords");
+    gl.enableVertexAttribArray(tex_coords_loc);
+    const texVBO = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, texVBO);
+    gl.bufferData(gl.ARRAY_BUFFER,
+        new Float32Array([0.0, 0.0,  1.0, 0.0,  0.5, 1.0]), gl.STATIC_DRAW);
+    gl.vertexAttribPointer(tex_coords_loc, 2, gl.FLOAT, false, 0, 0);
 
-    const imageURL = new URL("static/unnamed.jpg", document.baseURI).href;
-    const image = new Image();
-    image.src = imageURL;
+    translate(0.0, 0.0);
+    gl.uniform1i(sampler_loc, 0); // 0 = texMe
+    gl.drawArrays(gl.TRIANGLES, 0, 3); // top-left triangle
 
-    let tex1 = gl.createTexture();
-    gl.activeTexture(gl.TEXTURE0); //activate texture unit 0
-    gl.bindTexture(gl.TEXTURE_2D, tex1);
+    gl.bindBuffer(gl.ARRAY_BUFFER, triangleIFSPosVBO);
+    gl.vertexAttribPointer(positionAttribLoc, 2, gl.FLOAT, false, 0, 0);
+    gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, triangleIFSVBO);
 
-    // Non-PowerOfTwo safe defaults (no mipmaps)
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    for (let i = 0; i < totalTriangles; i++) {
+        // random texture unit
+        const texUnit = Math.floor(Math.random() * 2);
+        gl.uniform1i(sampler_loc, texUnit);
 
-    // placeholder
-    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, 1, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE,
-        new Uint8Array([255,0,255,255]));
+        // bounded random location
+        const dx = Math.random() * 1.4;
+        const dy = Math.random() * -1.7;
+        translate(dx, dy);
+        gl.drawElements(gl.TRIANGLES, 3, gl.UNSIGNED_BYTE, 0); // all triangles
+    }
+}
 
-    const sampler_loc = gl.getUniformLocation(shaderProgram, "u_texture");
-    gl.uniform1i(sampler_loc, 0);
-
-    // UV attrib
-    const tex_VBO = gl.createBuffer();
-    gl.bindBuffer(gl.ARRAY_BUFFER, tex_VBO);
-    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([
-      0.0, 0.0,
-      1.0, 0.0,
-      0.5, 1.0
-    ]), gl.STATIC_DRAW);
-    const texLoc = gl.getAttribLocation(shaderProgram, "tex_coords");
-    gl.enableVertexAttribArray(texLoc);
-    gl.vertexAttribPointer(texLoc, 2, gl.FLOAT, false, 0, 0);
-    
-    // first draw (uses placeholder tex)
-    defineTranslation(0.0, 0.0);
-    gl.drawArrays(gl.TRIANGLES, 0, 3);
-
-    image.onload = () => {
-        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, image);
-
-        let tex_VBO = gl.createBuffer();
-        let uv = new Float32Array([
-            0.0, 0.0,
-            1.0, 0.0,
-            0.5, 1.0
-        ]);
-        gl.bindBuffer(gl.ARRAY_BUFFER, tex_VBO);
-        gl.bufferData(gl.ARRAY_BUFFER, uv, gl.STREAM_DRAW);
-
-        let tex_coords_loc = gl.getAttribLocation(shaderProgram, "tex_coords");
-        gl.enableVertexAttribArray(tex_coords_loc);
-        gl.vertexAttribPointer(tex_coords_loc, 2, gl.FLOAT, false, 0, 0);
-
-        defineTranslation(0.0, 0.0);
-        gl.drawArrays(gl.TRIANGLES, 0, 3);
-
-        gl.bindBuffer(gl.ARRAY_BUFFER, triangleIFSPosVBO);
-        gl.vertexAttribPointer(positionAttribLoc, 2, gl.FLOAT, false, 0, 0);
-        gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, triangleIFSVBO);
-
-        for (let i = 0; i < 100; i++) {
-            let dx = Math.random() * 1.43;
-            let dy = Math.random() * -1.7;
-            defineTranslation(dx, dy);
-            gl.drawElements(gl.TRIANGLES, 3, gl.UNSIGNED_BYTE, 0);
-        }
-    };
+function drawPoints() {
 }
 
 /** @type {Date} */
@@ -247,7 +271,7 @@ async function loadShaderText(path) {
  * @param {String} fragmentSource 
  */
 function compileAndLink(vertexSource, fragmentSource) {
-    let vertexShader = /** @type {WebGLShader} */ gl.createShader(gl.VERTEX_SHADER);
+    const vertexShader = /** @type {WebGLShader} */ gl.createShader(gl.VERTEX_SHADER);
     gl.shaderSource(vertexShader, vertexSource);
     gl.compileShader(vertexShader);
 
@@ -256,7 +280,7 @@ function compileAndLink(vertexSource, fragmentSource) {
         return;
     }
 
-    let fragmentShader =  /** @type {WebGLShader} */ gl.createShader(gl.FRAGMENT_SHADER);
+    const fragmentShader =  /** @type {WebGLShader} */ gl.createShader(gl.FRAGMENT_SHADER);
     gl.shaderSource(fragmentShader, fragmentSource);
     gl.compileShader(fragmentShader);
 
@@ -286,9 +310,9 @@ function resize() {
     gl.viewport(0, 0, canvas.clientWidth, canvas.clientHeight);
 }
 
-function initGL(vertexShaderSource, fragmentShaderSource) {
+function initGL() {
     now = new Date();
-    window.addEventListener('resize', resize);
+    window.addEventListener('resizevertexSource, fragmentSource', resize);
     resize();
     handleButtons();
 
@@ -299,24 +323,27 @@ function initGL(vertexShaderSource, fragmentShaderSource) {
     gl.clearColor(0.0, 0.0, 0.0, 1.0);
     gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
 
-    console.log("Max combined texture image units: ",
-        gl.getParameter(gl.MAX_COMBINED_TEXTURE_IMAGE_UNITS));
+    //console.log("Max combined texture image units: ", gl.getParameter(gl.MAX_COMBINED_TEXTURE_IMAGE_UNITS));
 
     compileAndLink(vertexShaderSource, fragmentShaderSource);
+    gl.useProgram(shaderProgram);
 
     frameTime = 1000;
     lastT = now.getMilliseconds() - frameTime; // ensure the first iteration doesn't wait
     animating = true;
     fpsSlider = document.getElementById('fps-slider');
-    defineTriangleBuffers();
-    defineElementalTriangle();
+
+    defineBasicTriangle();
+    defineTriangleShape();
+    loadTextures();
+
     animate();
 }
 
 async function init() {
     try {
         canvas = document.getElementById('webglcanvas');
-        let canvas_options = {
+        const canvas_options = {
             alpha: false,
             depth: false,
             antialias: true
@@ -334,9 +361,9 @@ async function init() {
         return;
     }
 
-    const vertexShaderSource = await loadShaderText("./shaders/vertexShader.glsl");
-    const fragmentShaderSource = await loadShaderText("./shaders/fragmentShader.glsl");
-    initGL(vertexShaderSource, fragmentShaderSource);
+    vertexShaderSource = await loadShaderText("./shaders/vertexShader.glsl");
+    fragmentShaderSource = await loadShaderText("./shaders/fragmentShader.glsl");
+    initGL();
 }
 
 window.onload = init;
