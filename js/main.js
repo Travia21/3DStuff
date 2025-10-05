@@ -1,5 +1,7 @@
 "use strict";
 
+//const { Vector3 } = require("three");
+
 /**
  * Vite method for getting text from files
  * Putting the text in GLSL files allows my LSPs to help me with syntax
@@ -11,6 +13,7 @@ var fragmentShaderSource;
 
 // I much prefer working with types, even if they are annotations
 var canvas = /** @type {HTMLCanvasElement} */ document.getElementById("webglcanvas");
+var aspect;
 
 /** @type {WebGL2RenderingContext} */
 var gl;
@@ -18,33 +21,35 @@ var gl;
 /** @type {WebGLProgram} */
 var shaderProgram;
 
+/** @type {GLint} */
+var u_transformMatrix_loc;
+
+/** @type {mat4} */
+var u_transformMatrix_dat;
+var transformMatrixStack;
+
+/** @type {mat4} */
+var u_modelview_loc, u_projection_loc;
+var u_modelview_dat, u_projection_dat;
+
+/** @type {SimpleRotator} */
+var rotator;
+
 /** @type {WebGLBuffer} */
 var triangleColorVBO, trianglePositionVBO;
 
 /** @type {GLint} */
-var colorAttribLoc, positionAttribLoc;
+var a_color_loc, a_position_loc;
+var a_color_dat, a_position_dat;
+var u_textured_loc, u_sampler_loc;
+var u_texCoords_loc;
 
-/** @type {Float32Array} */
-var translation;
-
-function translate(/** @type {float} */ dx, /** @type {float} */ dy) {
-    const translation_loc = gl.getUniformLocation(shaderProgram, "translation");
-    const translation_dat = new Float32Array([
-        1.0, 0.0, dx,
-        0.0, 1.0, dy,
-        0.0, 0.0, 1.0
-    ]);
-    gl.uniformMatrix3fv(translation_loc, false, translation_dat);
+function translate2D(/** @type {float} */ dx, /** @type {float} */ dy) {
+    mat4.translate(u_transformMatrix_dat, u_transformMatrix_dat, [dx, dy, 0.0, 0.0]);
 }
 
-function rotate(/** @type {float} */ degrees) {
-    const transformMat_loc = gl.getUniformLocation(shaderProgram, "transformMat");
-    const transformMat_dat = new Float32Array([
-        Math.cos(degrees), -Math.sin(degrees), 0.0,
-        Math.sin(degrees), Math.cos(degrees), 0.0,
-        0.0, 0.0, 1.0,
-    ]);
-    gl.uniformMatrix3fv(transformMat_loc, false, transformMat_dat);
+function rotate2D(/** @type {float} */ radians) {
+    mat4.rotate(u_transformMatrix_dat, u_transformMatrix_dat, radians, [0, 1, 0]);
 }
 
 function loadTextures() {
@@ -68,6 +73,14 @@ function loadTextures() {
     const texClover = gl.createTexture();
     gl.activeTexture(gl.TEXTURE1); // activate texture unit 0
     loadImage(cloverURL, texClover); // load the image into the texture object
+
+    // UV attribute
+    u_texCoords_loc = gl.getAttribLocation(shaderProgram, "tex_coords");
+    const texVBO = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, texVBO);
+    gl.bufferData(gl.ARRAY_BUFFER,
+        new Float32Array([0.0, 0.0,  1.0, 0.0,  0.5, 1.0]), gl.STATIC_DRAW);
+    gl.vertexAttribPointer(u_texCoords_loc, 2, gl.FLOAT, false, 0, 0);
 }
 
 function loadImage(/** @type {URL} */ url, /** @type {WebGLTexture} */ textureObject) {
@@ -80,10 +93,6 @@ function loadImage(/** @type {URL} */ url, /** @type {WebGLTexture} */ textureOb
         try {
             gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, image);
             gl.generateMipmap(gl.TEXTURE_2D); // only with Po2
-            console.log(
-                "width: ", image.width,
-                " height: ", image.height,
-                " texUnit: ", gl.getParameter(gl.ACTIVE_TEXTURE) - gl.TEXTURE0);
         } catch (e) {
             console.log(e);
         }
@@ -93,23 +102,13 @@ function loadImage(/** @type {URL} */ url, /** @type {WebGLTexture} */ textureOb
 }
 
 function defineBasicTriangle() {
-    /*
-    colorAttribLoc = gl.getAttribLocation(shaderProgram, 'color');
-    gl.enableVertexAttribArray(colorAttribLoc);
-    */
-    positionAttribLoc = gl.getAttribLocation(shaderProgram, 'position');
-    gl.enableVertexAttribArray(positionAttribLoc);
-
-    const redderAttribLoc = gl.getAttribLocation(shaderProgram, 'redder');
-    gl.vertexAttrib1f(redderAttribLoc, 0.1);
-
     trianglePositionVBO = gl.createBuffer();
     gl.bindBuffer(gl.ARRAY_BUFFER, trianglePositionVBO);
     // these are in clip coordinates
     const triangleVertices = new Float32Array([
-        -1.0, 0.7,
-        -0.7, 0.7,
-        -0.85, 1.0
+        -0.15, -0.10, +0.3,
+        +0.15, -0.10, +0.3,
+        +0.00, +0.20, +0.3
     ]);
     gl.bufferData(gl.ARRAY_BUFFER, triangleVertices, gl.STATIC_DRAW);
 }
@@ -130,46 +129,71 @@ function defineTriangleShape() {
 
     gl.bindBuffer(gl.ARRAY_BUFFER, triangleIFSPosVBO);
     const triangleVertices = new Float32Array([
-        -0.7, 0.7,
-        -0.4, 0.7,
-        -0.55, 1.0
+        -0.15, -0.15, +0.3,
+        +0.15, -0.15, +0.3,
+        +0.00, +0.15, +0.3
     ]);
     gl.bufferData(gl.ARRAY_BUFFER, triangleVertices, gl.STATIC_DRAW);
 }
 
-function drawSampleTriangle() {
-    const sampler_loc = gl.getUniformLocation(shaderProgram, "u_texture");
-    gl.uniform1i(sampler_loc, 0);
+/**
+ * Set up to draw a series of gl.TRIANGLE_FAN
+ */
+function drawBasicObject(primitiveType, color, vertices) {
+    //gl.enableVertexAttribArray(a_color_loc);
+    gl.enableVertexAttribArray(a_position_loc);
+
+    const vertexCount = vertices.length/3;
+    const colorParts = color.length;
+
+    gl.vertexAttrib4fv(a_color_loc, color);
+
+    //let vertexColors = new Float32Array(vertexCount * colorParts);
+    //for (let i = 0; i < vertexCount; i++) {
+    //    vertexColors[i * colorParts + 0] = color[0];
+    //    vertexColors[i * colorParts + 1] = color[1];
+    //    vertexColors[i * colorParts + 2] = color[2];
+    //    vertexColors[i * colorParts + 3] = color[3];
+    //}
+
+    //gl.bindBuffer(gl.ARRAY_BUFFER, a_color_dat);
+    //gl.bufferData(gl.ARRAY_BUFFER, vertexColors, gl.STATIC_DRAW);
+    //gl.vertexAttribPointer(a_color_loc, 4, gl.FLOAT, false, 0, 0);
+
+    gl.bindBuffer(gl.ARRAY_BUFFER, a_position_dat);
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(vertices), gl.STREAM_DRAW);
+    gl.vertexAttribPointer(a_position_loc, 3, gl.FLOAT, false, 0, 0);
+
+    gl.uniformMatrix4fv(u_transformMatrix_loc, false, u_transformMatrix_dat);
+    gl.drawArrays(primitiveType, 0, vertexCount);
+
+    gl.disableVertexAttribArray(a_position_loc);
+    //gl.disableVertexAttribArray(a_color_loc);
 }
 
-function drawBasicTriangles() {
+function drawTriangle() {
+    gl.enableVertexAttribArray(u_texCoords_loc);
+    gl.enableVertexAttribArray(a_position_loc);
+    gl.uniform1i(u_textured_loc, true);
+
+    u_sampler_loc = gl.getUniformLocation(shaderProgram, "u_texture");
+    gl.uniform1i(u_sampler_loc, 0);
+
     gl.bindBuffer(gl.ARRAY_BUFFER, trianglePositionVBO);
-    gl.vertexAttribPointer(positionAttribLoc, 2, gl.FLOAT, false, 0, 0);
+    gl.vertexAttribPointer(a_position_loc, 3, gl.FLOAT, false, 0, 0);
 
-    gl.bindBuffer(gl.ARRAY_BUFFER, triangleColorVBO);
-    const triangleColors = new Float32Array([
-        1.0, 0.0, 0.0, 0.9,
-        0.0, 1.0, 0.0, 0.9,
-        0.0, 0.0, 1.0, 0.9
-    ]);
-    gl.bufferData(gl.ARRAY_BUFFER, triangleColors, gl.STATIC_DRAW);
-    gl.vertexAttribPointer(colorAttribLoc, 4, gl.FLOAT, false, 0, 0);
+    transformMatrixStack.push(mat4.clone(u_transformMatrix_dat));
 
-    translate(0.0, 0.0);
+    translate2D(-0.85, 0.8);
+    gl.uniformMatrix4fv(u_transformMatrix_loc, false, u_transformMatrix_dat);
     gl.drawArrays(gl.TRIANGLES, 0, 3);
 
-    gl.bindBuffer(gl.ARRAY_BUFFER, triangleIFSPosVBO);
-    gl.vertexAttribPointer(positionAttribLoc, 2, gl.FLOAT, false, 0, 0);
-    gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, triangleIFSVBO);
+    u_transformMatrix_dat = transformMatrixStack.pop();
 
-    for (let i = 0; i < totalTriangles; i++) {
-        const dx = Math.random() * 1.4;
-        const dy = Math.random() * -1.7;
-        translate(dx, dy);
-        gl.drawElements(gl.TRIANGLES, 3, gl.UNSIGNED_BYTE, 0);
-    }
+    gl.uniform1i(u_textured_loc, false);
+    gl.disableVertexAttribArray(a_position_loc);
+    gl.disableVertexAttribArray(u_texCoords_loc);
 }
-
 
 /**
  * Some of this needs to be split out into other functions
@@ -178,30 +202,16 @@ function drawTexturedTriangles() {
     // set sampler to texture unit 0
     const sampler_loc = gl.getUniformLocation(shaderProgram, "u_texture");
 
-    // I need a way to keep track of the current transformation matrix.
-    rotate(0);
-
     gl.bindBuffer(gl.ARRAY_BUFFER, trianglePositionVBO);
-    gl.vertexAttribPointer(positionAttribLoc, 2, gl.FLOAT, false, 0, 0);
-
-    // UV attribute
-    const tex_coords_loc = gl.getAttribLocation(shaderProgram, "tex_coords");
-    gl.enableVertexAttribArray(tex_coords_loc);
-    const texVBO = gl.createBuffer();
-    gl.bindBuffer(gl.ARRAY_BUFFER, texVBO);
-    gl.bufferData(gl.ARRAY_BUFFER,
-        new Float32Array([0.0, 0.0,  1.0, 0.0,  0.5, 1.0]), gl.STATIC_DRAW);
-    gl.vertexAttribPointer(tex_coords_loc, 2, gl.FLOAT, false, 0, 0);
-
-    translate(0.0, 0.0);
-    gl.uniform1i(sampler_loc, 0); // 0 = texMe
-    gl.drawArrays(gl.TRIANGLES, 0, 3); // top-left triangle
+    gl.vertexAttribPointer(a_position_loc, 2, gl.FLOAT, false, 0, 0);
 
     gl.bindBuffer(gl.ARRAY_BUFFER, triangleIFSPosVBO);
-    gl.vertexAttribPointer(positionAttribLoc, 2, gl.FLOAT, false, 0, 0);
+    gl.vertexAttribPointer(a_position_loc, 2, gl.FLOAT, false, 0, 0);
     gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, triangleIFSVBO);
 
     for (let i = 0; i < totalTriangles; i++) {
+        transformMatrixStack.push(mat4.clone(u_transformMatrix_dat));
+
         // random texture unit
         const texUnit = Math.floor(Math.random() * 2);
         gl.uniform1i(sampler_loc, texUnit);
@@ -209,12 +219,18 @@ function drawTexturedTriangles() {
         // bounded random location
         const dx = Math.random() * 1.4;
         const dy = Math.random() * -1.7;
-        translate(dx, dy);
+        translate2D(dx - 0.55, dy + 0.85); // the math is because I don't compile translations
+
+        gl.uniformMatrix4fv(u_transformMatrix_loc, false, u_transformMatrix_dat);
         gl.drawElements(gl.TRIANGLES, 3, gl.UNSIGNED_BYTE, 0); // all triangles
+
+        u_transformMatrix_dat = transformMatrixStack.pop();
     }
 }
 
-function drawPoints() {
+
+function drawPyramid() {
+    
 }
 
 /** @type {Date} */
@@ -234,7 +250,7 @@ var fpsSlider;
 
 /**
  * Animation handling function
- * 
+ * , 1.0
  */
 async function animate() {
     // Change this so the speed increase is linear rather than exponential
@@ -246,8 +262,26 @@ async function animate() {
     }
 
     if (!animating) { return; }
-    //drawTriangles();
-    drawTexturedTriangles();
+
+    drawBasicObject(gl.TRIANGLE_FAN, [1, 0, 0, 1],
+        [-0.25,-0.25,0.25, 0.25,-0.25,0.25, 0.25,0.25,0.25, -0.25,0.25,0.25]);
+    drawBasicObject(gl.TRIANGLE_FAN, [0, 1, 1, 1],
+        [ -0.25,-0.25,-0.25, -0.25,0.25,-0.25, 0.25,0.25,-0.25, 0.25,-0.25,-0.25]);
+    drawBasicObject(gl.TRIANGLE_FAN, [1, 1, 0, 1],
+        [ -0.25,0.25,-0.25, -0.25,0.25,0.25, 0.25,0.25,0.25, 0.25,0.25,-0.25 ]);
+    drawBasicObject(gl.TRIANGLE_FAN, [1, 0, 1, 1],
+        [ -0.25,-0.25,-0.25, 0.25,-0.25,-0.25, 0.25,-0.25,0.25, -0.25,-0.25,0.25 ]);
+    drawBasicObject(gl.TRIANGLE_FAN, [0, 1, 0, 1],
+        [ 0.25,-0.25,-0.25, 0.25,0.25,-0.25, 0.25,0.25,0.25, 0.25,-0.25,0.25 ]);
+    drawBasicObject(gl.TRIANGLE_FAN, [1, 1, 1, 1],
+        [ -0.25,-0.25,-0.25, -0.25,-0.25,0.25, -0.25,0.25,0.25, -0.25,0.25,-0.25 ]);
+
+    drawTriangle();
+    //drawTexturedTriangles();
+
+    mat4.rotateX(u_transformMatrix_dat, u_transformMatrix_dat, Math.PI/27);
+    mat4.rotateY(u_transformMatrix_dat, u_transformMatrix_dat, Math.PI/13);
+
     requestAnimationFrame(animate);
 }
 
@@ -276,7 +310,8 @@ function compileAndLink(vertexSource, fragmentSource) {
     gl.compileShader(vertexShader);
 
     if (!gl.getShaderParameter(vertexShader, gl.COMPILE_STATUS)) {
-        console.error("Vertex shader error: ", gl.getShaderInfoLog(vertexShader));
+        const log = gl.getShaderInfoLog(vertexShader);
+        console.error("Vertex shader error: ", log);
         return;
     }
 
@@ -285,7 +320,8 @@ function compileAndLink(vertexSource, fragmentSource) {
     gl.compileShader(fragmentShader);
 
     if (!gl.getShaderParameter(fragmentShader, gl.COMPILE_STATUS)) {
-        console.error("Fragment shader error: ", gl.getShaderInfoLog(fragmentShader));
+        const log = gl.getShaderInfoLog(fragmentShader);
+        console.error("Fragment shader error: ", log);
         return;
     }
 
@@ -310,9 +346,14 @@ function resize() {
     gl.viewport(0, 0, canvas.clientWidth, canvas.clientHeight);
 }
 
+function rotatorCallback() {
+    const viewMatrix = new Float32Array(rotator.getViewMatrix());
+    console.log("callback\n", viewMatrix);
+}
+
 function initGL() {
     now = new Date();
-    window.addEventListener('resizevertexSource, fragmentSource', resize);
+    window.addEventListener('resize', resize);
     resize();
     handleButtons();
 
@@ -323,15 +364,41 @@ function initGL() {
     gl.clearColor(0.0, 0.0, 0.0, 1.0);
     gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
 
-    //console.log("Max combined texture image units: ", gl.getParameter(gl.MAX_COMBINED_TEXTURE_IMAGE_UNITS));
-
     compileAndLink(vertexShaderSource, fragmentShaderSource);
     gl.useProgram(shaderProgram);
+    
+    u_modelview_loc = gl.getUniformLocation(shaderProgram, "modelview");
+    u_projection_loc = gl.getUniformLocation(shaderProgram, "projection");
+    u_transformMatrix_loc = gl.getUniformLocation(shaderProgram, "transformMatrix");
+    u_textured_loc = gl.getUniformLocation(shaderProgram, "textured");
+    u_sampler_loc = gl.getUniformLocation(shaderProgram, "u_texture");
+    a_color_loc = gl.getAttribLocation(shaderProgram, "color");
+    a_position_loc = gl.getAttribLocation(shaderProgram, "position");
+
+    u_modelview_dat = mat4.create();
+
+    u_projection_dat = mat4.create();
+    mat4.perspective(u_projection_dat, Math.PI/4, aspect, 0.1, 5);
+    gl.uniformMatrix4fv(u_modelview_loc, false, u_modelview_dat);
+    gl.uniformMatrix4fv(u_projection_loc, false, u_projection_dat);
+
+    u_transformMatrix_dat = mat4.create();
+    // move the scene into viewable range
+    mat4.translate(u_transformMatrix_dat, u_transformMatrix_dat, [0, 0, -3, 0]);
+    mat4.scale(u_transformMatrix_dat, u_transformMatrix_dat, [1, 1, 1]);
+    gl.uniformMatrix4fv(u_transformMatrix_loc, false, u_transformMatrix_dat);
+
+    transformMatrixStack = [];
+
+    rotator = new SimpleRotator(canvas, rotatorCallback, 10);
 
     frameTime = 1000;
     lastT = now.getMilliseconds() - frameTime; // ensure the first iteration doesn't wait
     animating = true;
     fpsSlider = document.getElementById('fps-slider');
+
+    a_color_dat = gl.createBuffer();
+    a_position_dat = gl.createBuffer();
 
     defineBasicTriangle();
     defineTriangleShape();
@@ -343,9 +410,10 @@ function initGL() {
 async function init() {
     try {
         canvas = document.getElementById('webglcanvas');
+        aspect = canvas.width / canvas.height;
         const canvas_options = {
             alpha: false,
-            depth: false,
+            depth: true,
             antialias: true
         };
         //gl = canvas.getContext('webgl2', canvas_options)
@@ -367,4 +435,3 @@ async function init() {
 }
 
 window.onload = init;
-

@@ -1,13 +1,17 @@
-precision mediump float;
+#ifdef GL_FRAGMENT_PRECISION_HIGH
+   precision highp float;
+#else
+   precision mediump float;
+#endif
 
-uniform mat3 translation;
-uniform mat3 transformMat;
+uniform mat4 transformMatrix;
+uniform mat4 modelview;
+uniform mat4 projection;
+uniform bool textured;
 
-attribute vec2 position;
 attribute vec2 tex_coords;
 attribute vec4 color;
-
-attribute float redder;
+attribute vec3 position;
 
 varying vec4 fragColor;
 varying vec2 uv_coords;
@@ -15,16 +19,15 @@ varying vec2 uv_coords;
 varying vec3 transformMat_display;
 
 void main() {
-    vec4 more_red = clamp(color + vec4(redder, 0.0, 0.0, 0.0), 0.0, 1.0);
-    fragColor = more_red;
-
-    uv_coords = tex_coords;
-    vec3 translatedPos= vec3(position, 1.0) * translation;
-    vec3 transformedPos = translatedPos * transformMat;
+    mat4 modelviewProjection = projection * modelview;
+    vec4 transformedPos = transformMatrix * vec4(position, 1.0);
 
     // how to debug shaders apparently
     //transformMat_display = vec3(transformMat[0][0], transformMat[1][1], transformMat[2][2]);
 
-    gl_Position = vec4(transformedPos.xy, 0.0, 1.0);
+    uv_coords = tex_coords;
+    fragColor = color;
+    //fragColor = vec4(1.0);
+    //gl_Position = modelviewProjection * transformedPos;
+    gl_Position = projection * modelview * transformMatrix * vec4(position, 1.0);
 }
-
