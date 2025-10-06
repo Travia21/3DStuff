@@ -228,13 +228,14 @@ function draw() {
         const newDir = vec3.create();
         vec4.transformMat4(newPos, u_lights_dat[i].position, u_modelview_dat);
         gl.uniform4fv(u_lights_loc[i].position, newPos);
+
+        // this one was tricky
         if (Object.hasOwn(u_lights_dat[i], "spotDirection")) {
             vec3.transformMat3(newDir,
                 u_lights_dat[i].spotDirection,
                 mat3.normalFromMat4(mat3.create(), u_modelview_dat)
             );
             gl.uniform3fv(u_lights_loc[i].spotDirection, newDir);
-            console.log(newDir);
         }
     }
 
@@ -295,8 +296,19 @@ function animateButton() {
     if (animating) { animate(); }
 }
 
+function lightButton(event) {
+    const index = event.target.dataset.index;
+    u_lights_dat[index].enabled = !u_lights_dat[index].enabled;
+    gl.uniform1i(u_lights_loc[index].enabled, u_lights_dat[index].enabled);
+    draw();
+}
+
 function handleButtons() {
     document.getElementById("animate-btn").addEventListener("click", animateButton);
+    document.getElementById("light0-btn").addEventListener("click", lightButton);
+    document.getElementById("light1-btn").addEventListener("click", lightButton);
+    document.getElementById("light2-btn").addEventListener("click", lightButton);
+    document.getElementById("light3-btn").addEventListener("click", lightButton);
 }
 
 async function loadShaderText(path) {
@@ -375,7 +387,6 @@ function initGL() {
     now = new Date();
     window.addEventListener('resize', resize);
     resize();
-    handleButtons();
 
     gl.enable(gl.DEPTH_TEST);
     gl.enable(gl.BLEND);
@@ -454,8 +465,8 @@ function initGL() {
     // point light
     u_lights_dat[3] = {
         enabled: true,
-        position: [1.5, -0.5, 0.0, 1.0],
-        color: [0.0, 0.3, 0.0]
+        position: [2.0, 0.5, 0.0, 1.0],
+        color: [0.0, 1.0, 0.0]
     };
 
     for (var i = 0; i < u_lights_loc.length; i++) {
@@ -506,6 +517,7 @@ function initGL() {
     defineBasicTriangle();
     defineTriangleShape();
     loadTextures();
+    handleButtons();
 
     animate();
 }

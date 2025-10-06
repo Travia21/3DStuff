@@ -2,10 +2,11 @@
 <html lang="en">
   <head>
     <meta charset="utf-8">
-    <title>webgl-app</title>
+    <title>Project 4 - webgl-app</title>
     <link rel="stylesheet" href="./styles.css">
     <script src="./js/scripts/simple-rotator.js"></script>
     <script src="./js/scripts/gl-matrix-min.js"></script>
+    <script type="module" src="./js/objects/shapes.js"></script>
     <script type="module" src="./js/main.js"></script>
   </head>
   <body>
@@ -14,7 +15,12 @@
     <div id="controls-holder">
         <button id="animate-btn">Animate Switch</button>
         </br>
-        <input type="range" min="1" max="1000" value="1" class="slider" id="fps-slider">
+        <button id="light0-btn" data-index="0">Eye Light</button>
+        <button id="light1-btn" data-index="1">Spotlight</button>
+        <button id="light2-btn" data-index="2">Directional Light</button>
+        <button id="light3-btn" data-index="3">Point Light</button>
+        </br>
+        <input type="range" min="1" max="120" value="60" class="slider" id="fps-slider">
     </div>
     <h3>WebGL 2.0</h3>
 
