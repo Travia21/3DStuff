@@ -1,13 +1,10 @@
 "use strict";
 
-//const { Vector3 } = require("three");
+import * as SHAPES from "./objects/shapes";
 
-/**
- * Vite method for getting text from files
- * Putting the text in GLSL files allows my LSPs to help me with syntax
- */
-//import vertexShaderSource from '../shaders/vertexShader.glsl?raw'
-//import fragmentShaderSource from '../shaders/fragmentShader.glsl?raw'
+// unfortunately necessary until I figure out how JS actually works
+const { mat2, mat2d, mat3, mat4, quat, quat2, vec2, vec3, vec4 } = glMatrix;
+
 var vertexShaderSource;
 var fragmentShaderSource;
 
@@ -21,35 +18,39 @@ var gl;
 /** @type {WebGLProgram} */
 var shaderProgram;
 
-/** @type {GLint} */
-var u_transformMatrix_loc;
-
-/** @type {mat4} */
-var u_transformMatrix_dat;
-var transformMatrixStack;
-
 /** @type {mat4} */
 var u_modelview_loc, u_projection_loc;
 var u_modelview_dat, u_projection_dat;
+var modelviewStack;
+// u_modelview_dat is maintained by rotator's view matrix
 
 /** @type {SimpleRotator} */
 var rotator;
+var rotateX, rotateY, rotateZ;
 
 /** @type {WebGLBuffer} */
 var triangleColorVBO, trianglePositionVBO;
 
 /** @type {GLint} */
-var a_color_loc, a_position_loc;
-var a_color_dat, a_position_dat;
+var u_fragColor_loc, a_position_loc;
+var u_fragColor_dat, a_position_dat;
 var u_textured_loc, u_sampler_loc;
 var u_texCoords_loc;
+var u_normalMatrix_dat, u_normalMatrix_loc;
+var u_lit_loc;
+var u_lights_loc, u_lights_dat;
+var u_frontMaterial_loc, u_backMaterial_loc;
+
+var lightPositions = [
+    [0,0,0,1], [0,0,1,0], [0,1,0,0], [0,0,-10,1], [2,3,5,0]
+];
 
 function translate2D(/** @type {float} */ dx, /** @type {float} */ dy) {
-    mat4.translate(u_transformMatrix_dat, u_transformMatrix_dat, [dx, dy, 0.0, 0.0]);
+    mat4.translate(u_modelview_dat, u_modelview_dat, [dx, dy, 0.0, 0.0]);
 }
 
 function rotate2D(/** @type {float} */ radians) {
-    mat4.rotate(u_transformMatrix_dat, u_transformMatrix_dat, radians, [0, 1, 0]);
+    mat4.rotate(u_modelview_dat, u_modelview_dat, radians, [0, 1, 0]);
 }
 
 function loadTextures() {
@@ -106,9 +107,9 @@ function defineBasicTriangle() {
     gl.bindBuffer(gl.ARRAY_BUFFER, trianglePositionVBO);
     // these are in clip coordinates
     const triangleVertices = new Float32Array([
-        -0.15, -0.10, +0.3,
-        +0.15, -0.10, +0.3,
-        +0.00, +0.20, +0.3
+        -0.15, -0.10, +0.0,
+        +0.15, -0.10, +0.0,
+        +0.00, +0.20, +0.0
     ]);
     gl.bufferData(gl.ARRAY_BUFFER, triangleVertices, gl.STATIC_DRAW);
 }
@@ -136,41 +137,6 @@ function defineTriangleShape() {
     gl.bufferData(gl.ARRAY_BUFFER, triangleVertices, gl.STATIC_DRAW);
 }
 
-/**
- * Set up to draw a series of gl.TRIANGLE_FAN
- */
-function drawBasicObject(primitiveType, color, vertices) {
-    //gl.enableVertexAttribArray(a_color_loc);
-    gl.enableVertexAttribArray(a_position_loc);
-
-    const vertexCount = vertices.length/3;
-    const colorParts = color.length;
-
-    gl.vertexAttrib4fv(a_color_loc, color);
-
-    //let vertexColors = new Float32Array(vertexCount * colorParts);
-    //for (let i = 0; i < vertexCount; i++) {
-    //    vertexColors[i * colorParts + 0] = color[0];
-    //    vertexColors[i * colorParts + 1] = color[1];
-    //    vertexColors[i * colorParts + 2] = color[2];
-    //    vertexColors[i * colorParts + 3] = color[3];
-    //}
-
-    //gl.bindBuffer(gl.ARRAY_BUFFER, a_color_dat);
-    //gl.bufferData(gl.ARRAY_BUFFER, vertexColors, gl.STATIC_DRAW);
-    //gl.vertexAttribPointer(a_color_loc, 4, gl.FLOAT, false, 0, 0);
-
-    gl.bindBuffer(gl.ARRAY_BUFFER, a_position_dat);
-    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(vertices), gl.STREAM_DRAW);
-    gl.vertexAttribPointer(a_position_loc, 3, gl.FLOAT, false, 0, 0);
-
-    gl.uniformMatrix4fv(u_transformMatrix_loc, false, u_transformMatrix_dat);
-    gl.drawArrays(primitiveType, 0, vertexCount);
-
-    gl.disableVertexAttribArray(a_position_loc);
-    //gl.disableVertexAttribArray(a_color_loc);
-}
-
 function drawTriangle() {
     gl.enableVertexAttribArray(u_texCoords_loc);
     gl.enableVertexAttribArray(a_position_loc);
@@ -182,55 +148,30 @@ function drawTriangle() {
     gl.bindBuffer(gl.ARRAY_BUFFER, trianglePositionVBO);
     gl.vertexAttribPointer(a_position_loc, 3, gl.FLOAT, false, 0, 0);
 
-    transformMatrixStack.push(mat4.clone(u_transformMatrix_dat));
-
     translate2D(-0.85, 0.8);
-    gl.uniformMatrix4fv(u_transformMatrix_loc, false, u_transformMatrix_dat);
+    gl.uniformMatrix4fv(u_modelview_loc, false, u_modelview_dat);
     gl.drawArrays(gl.TRIANGLES, 0, 3);
-
-    u_transformMatrix_dat = transformMatrixStack.pop();
 
     gl.uniform1i(u_textured_loc, false);
     gl.disableVertexAttribArray(a_position_loc);
     gl.disableVertexAttribArray(u_texCoords_loc);
 }
 
-/**
- * Some of this needs to be split out into other functions
- */
-function drawTexturedTriangles() {
-    // set sampler to texture unit 0
-    const sampler_loc = gl.getUniformLocation(shaderProgram, "u_texture");
+function drawSphere(radius, slices, stacks) {
+    // Draw sphere
+    modelviewStack.push(mat4.clone(u_modelview_dat));
+    gl.enable(gl.CULL_FACE);
 
-    gl.bindBuffer(gl.ARRAY_BUFFER, trianglePositionVBO);
-    gl.vertexAttribPointer(a_position_loc, 2, gl.FLOAT, false, 0, 0);
+    gl.uniform1i(u_lit_loc, true);
 
-    gl.bindBuffer(gl.ARRAY_BUFFER, triangleIFSPosVBO);
-    gl.vertexAttribPointer(a_position_loc, 2, gl.FLOAT, false, 0, 0);
-    gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, triangleIFSVBO);
+    mat4.translate(u_modelview_dat, u_modelview_dat, [0.5, -0.5, 0]);
+    mat4.rotateX(u_modelview_dat, u_modelview_dat, Math.PI/7);
+    drawModel(SHAPES.uvSphere(radius, slices, stacks), false);
 
-    for (let i = 0; i < totalTriangles; i++) {
-        transformMatrixStack.push(mat4.clone(u_transformMatrix_dat));
+    gl.uniform1i(u_lit_loc, false);
 
-        // random texture unit
-        const texUnit = Math.floor(Math.random() * 2);
-        gl.uniform1i(sampler_loc, texUnit);
-
-        // bounded random location
-        const dx = Math.random() * 1.4;
-        const dy = Math.random() * -1.7;
-        translate2D(dx - 0.55, dy + 0.85); // the math is because I don't compile translations
-
-        gl.uniformMatrix4fv(u_transformMatrix_loc, false, u_transformMatrix_dat);
-        gl.drawElements(gl.TRIANGLES, 3, gl.UNSIGNED_BYTE, 0); // all triangles
-
-        u_transformMatrix_dat = transformMatrixStack.pop();
-    }
-}
-
-
-function drawPyramid() {
-    
+    gl.disable(gl.CULL_FACE);
+    u_modelview_dat = modelviewStack.pop();
 }
 
 /** @type {Date} */
@@ -253,8 +194,7 @@ var fpsSlider;
  * , 1.0
  */
 async function animate() {
-    // Change this so the speed increase is linear rather than exponential
-    frameTime = fpsSlider.value * -1 + 1000;
+    frameTime = 1000 / fpsSlider.value;
     dT = now.getMilliseconds() - lastT;
     lastT = now.getMilliseconds();
     if (dT < frameTime) { // 1 second
@@ -263,26 +203,91 @@ async function animate() {
 
     if (!animating) { return; }
 
-    drawBasicObject(gl.TRIANGLE_FAN, [1, 0, 0, 1],
-        [-0.25,-0.25,0.25, 0.25,-0.25,0.25, 0.25,0.25,0.25, -0.25,0.25,0.25]);
-    drawBasicObject(gl.TRIANGLE_FAN, [0, 1, 1, 1],
-        [ -0.25,-0.25,-0.25, -0.25,0.25,-0.25, 0.25,0.25,-0.25, 0.25,-0.25,-0.25]);
-    drawBasicObject(gl.TRIANGLE_FAN, [1, 1, 0, 1],
-        [ -0.25,0.25,-0.25, -0.25,0.25,0.25, 0.25,0.25,0.25, 0.25,0.25,-0.25 ]);
-    drawBasicObject(gl.TRIANGLE_FAN, [1, 0, 1, 1],
-        [ -0.25,-0.25,-0.25, 0.25,-0.25,-0.25, 0.25,-0.25,0.25, -0.25,-0.25,0.25 ]);
-    drawBasicObject(gl.TRIANGLE_FAN, [0, 1, 0, 1],
-        [ 0.25,-0.25,-0.25, 0.25,0.25,-0.25, 0.25,0.25,0.25, 0.25,-0.25,0.25 ]);
-    drawBasicObject(gl.TRIANGLE_FAN, [1, 1, 1, 1],
-        [ -0.25,-0.25,-0.25, -0.25,-0.25,0.25, -0.25,0.25,0.25, -0.25,0.25,-0.25 ]);
+    // I don't want weird floating point errors accumulating at any point
+    rotateY = (rotateY + 0.05) % (2*Math.PI);
 
-    drawTriangle();
-    //drawTexturedTriangles();
-
-    mat4.rotateX(u_transformMatrix_dat, u_transformMatrix_dat, Math.PI/27);
-    mat4.rotateY(u_transformMatrix_dat, u_transformMatrix_dat, Math.PI/13);
+    draw();
 
     requestAnimationFrame(animate);
+}
+
+function draw() {
+    gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+    u_modelview_dat = rotator.getViewMatrix();
+    // Apply manual rotations from keyboard
+    mat4.rotateX(u_modelview_dat, u_modelview_dat, rotateX);
+    mat4.rotateY(u_modelview_dat, u_modelview_dat, rotateY);
+    mat4.rotateZ(u_modelview_dat, u_modelview_dat, rotateZ);
+    gl.uniformMatrix4fv(u_modelview_loc, false, u_modelview_dat);
+
+    // Transform light coordinates and spotlight directions
+    // to eye coordinates
+    // light index 0 is always the eye light
+    for (let i = 1; i < u_lights_loc.length; i++) {
+        const newPos = new Float32Array(4);
+        const newDir = vec3.create();
+        vec4.transformMat4(newPos, u_lights_dat[i].position, u_modelview_dat);
+        gl.uniform4fv(u_lights_loc[i].position, newPos);
+        if (Object.hasOwn(u_lights_dat[i], "spotDirection")) {
+            vec3.transformMat3(newDir,
+                u_lights_dat[i].spotDirection,
+                mat3.normalFromMat4(mat3.create(), u_modelview_dat)
+            );
+            gl.uniform3fv(u_lights_loc[i].spotDirection, newDir);
+            console.log(newDir);
+        }
+    }
+
+    // Draw 2D textured triangle
+    modelviewStack.push(mat4.clone(u_modelview_dat));
+    drawTriangle();
+    u_modelview_dat = modelviewStack.pop();
+
+    gl.uniform3f( u_frontMaterial_loc.diffuseColor, 1.0, 1.0, 1.0 );
+    gl.uniform3f( u_frontMaterial_loc.specularColor, 0.2, 0.2, 0.2 );
+    gl.uniform1f( u_frontMaterial_loc.specularExponent, 32 );
+
+    gl.uniform3f( u_backMaterial_loc.diffuseColor, 0, 0.5, 0.25 );
+    gl.uniform3f( u_backMaterial_loc.specularColor, 0.1, 0.1, 0.1 );
+    gl.uniform1f( u_backMaterial_loc.specularExponent, 32 );
+
+    drawSphere(0.35, 32, 16);
+}
+
+var a_normal_loc;
+var a_normal_dat, index_buffer;
+function drawModel(modelData, /** @type {bool} */ splines) {
+    gl.enableVertexAttribArray(a_position_loc);
+    gl.enableVertexAttribArray(a_normal_loc);
+
+    gl.bindBuffer(gl.ARRAY_BUFFER, a_position_dat);
+    gl.bufferData(gl.ARRAY_BUFFER, modelData.vertexPositions, gl.STATIC_DRAW);
+    gl.vertexAttribPointer(a_position_loc, 3, gl.FLOAT, false, 0, 0);
+
+    gl.bindBuffer(gl.ARRAY_BUFFER, a_normal_dat);
+    gl.bufferData(gl.ARRAY_BUFFER, modelData.vertexNormals, gl.STATIC_DRAW);
+    gl.vertexAttribPointer(a_normal_loc, 3, gl.FLOAT, false, 0, 0);
+
+    gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, index_buffer);
+    gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, modelData.indices, gl.STATIC_DRAW);
+
+    mat3.normalFromMat4(u_normalMatrix_dat, u_modelview_dat);
+    gl.uniformMatrix3fv(u_normalMatrix_loc, false, u_normalMatrix_dat);
+    gl.uniformMatrix4fv(u_projection_loc, false, u_projection_dat);
+
+    gl.uniformMatrix4fv(u_modelview_loc, false, u_modelview_dat);
+    gl.drawElements(gl.TRIANGLES, modelData.indices.length, gl.UNSIGNED_SHORT, 0);
+
+    if (splines) {
+        gl.enable(gl.POLYGON_OFFSET_FILL);
+        gl.polygonOffset(1,1);
+        gl.uniform3f(u_frontMaterial_loc.diffuseColor, 0,0,0,1);
+        gl.drawElements(gl.LINES, modelData.indices.length, gl.UNSIGNED_SHORT, 0);
+        gl.disable(gl.POLYGON_OFFSET_FILL);
+    }
+
+    gl.disableVertexAttribArray(a_position_loc);
+    gl.disableVertexAttribArray(a_normal_loc);
 }
 
 function animateButton() {
@@ -346,9 +351,24 @@ function resize() {
     gl.viewport(0, 0, canvas.clientWidth, canvas.clientHeight);
 }
 
-function rotatorCallback() {
-    const viewMatrix = new Float32Array(rotator.getViewMatrix());
-    console.log("callback\n", viewMatrix);
+function keyListener(event) {
+    switch (event.keyCode) {
+        case 37: rotateY = (rotateY - 0.05) % (2*Math.PI); break;        // left arrow
+        case 39: rotateY = (rotateY + 0.05) % (2*Math.PI); break;       // right arrow
+        case 38: rotateX = (rotateX - 0.05) % (2*Math.PI); break;        // up arrow
+        case 40: rotateX = (rotateX + 0.05) % (2*Math.PI); break;        // down arrow
+        case 33: rotateZ = (rotateZ + 0.05) % (2*Math.PI); break;        // PageUp
+        case 34: rotateZ = (rotateZ - 0.05) % (2*Math.PI); break;        // PageDown
+        case 13:                                // return key
+        case 36: rotateX = rotateY = rotateZ = 0; break;  // home key
+        default: {
+            event.preventDefault();
+            console.log("key: ", event.keyCode);
+            return;
+        }
+    }
+
+    draw();
 }
 
 function initGL() {
@@ -366,39 +386,122 @@ function initGL() {
 
     compileAndLink(vertexShaderSource, fragmentShaderSource);
     gl.useProgram(shaderProgram);
+
+    rotator = new SimpleRotator(canvas, draw, 3);
     
     u_modelview_loc = gl.getUniformLocation(shaderProgram, "modelview");
     u_projection_loc = gl.getUniformLocation(shaderProgram, "projection");
-    u_transformMatrix_loc = gl.getUniformLocation(shaderProgram, "transformMatrix");
     u_textured_loc = gl.getUniformLocation(shaderProgram, "textured");
     u_sampler_loc = gl.getUniformLocation(shaderProgram, "u_texture");
-    a_color_loc = gl.getAttribLocation(shaderProgram, "color");
-    a_position_loc = gl.getAttribLocation(shaderProgram, "position");
 
-    u_modelview_dat = mat4.create();
+    u_lit_loc = gl.getUniformLocation(shaderProgram, "lit");
+    u_lights_loc = new Array(4);
+    for (let i = 0; i < u_lights_loc.length; i++) {
+        u_lights_loc[i] = {
+            enabled: gl.getUniformLocation(shaderProgram, "lights[" + i + "].enabled"),
+            position: gl.getUniformLocation(shaderProgram, "lights[" + i + "].position"),
+            color: gl.getUniformLocation(shaderProgram, "lights[" + i + "].color"),
+            spotDirection: gl.getUniformLocation(shaderProgram, "lights[" + i + "].spotDirection"),
+            spotCutoff: gl.getUniformLocation(shaderProgram, "lights[" + i + "].spotCutoff"),
+            spotExponent: gl.getUniformLocation(shaderProgram, "lights[" + i + "].spotExponent"),
+        };
+    }
+
+    u_frontMaterial_loc = {
+        diffuseColor: gl.getUniformLocation(shaderProgram, "frontMaterial.diffuseColor"),
+        specularColor: gl.getUniformLocation(shaderProgram, "frontMaterial.specularColor"),
+        specularExponent: gl.getUniformLocation(shaderProgram, "frontMaterial.specularExponent")
+    };
+
+    u_backMaterial_loc = {
+        diffuseColor: gl.getUniformLocation(shaderProgram, "backMaterial.diffuseColor"),
+        specularColor: gl.getUniformLocation(shaderProgram, "backMaterial.specularColor"),
+        specularExponent: gl.getUniformLocation(shaderProgram, "backMaterial.specularExponent")
+    };
+
+    u_fragColor_loc = gl.getAttribLocation(shaderProgram, "fragColor");
+    a_position_loc = gl.getAttribLocation(shaderProgram, "position");
+    a_normal_loc = gl.getAttribLocation(shaderProgram, "a_normal");
+    u_normalMatrix_loc = gl.getUniformLocation(shaderProgram, "normalMatrix");
+
+    u_normalMatrix_dat = mat3.create();
+
+    u_lights_dat = [];
+    // Eye camera point light
+    u_lights_dat[0] = {
+        enabled: true,
+        position: [0.0, 0.0, 3.0, 1.0],
+        color: [0.5, 0.5, 0.5],
+    };
+
+    // Triangle to sphere spotlight
+    u_lights_dat[1] = {
+        enabled: true,
+        position: [-0.85, 0.8, 0.0, 1.0],
+        color: [0.0, 0.0, 1.0],
+        spotDirection: [1.35, -1.3, 0], // triangle to sphere
+        spotCutoff: glMatrix.glMatrix.toRadian(10), // these two numbers took some
+        spotExponent: 90,                           // trial and error
+    };
+
+    // back-to-front directional light
+    u_lights_dat[2] = {
+        enabled: true,
+        position: [0, 0, -1, 0.0],
+        color: [1.0, 0.0, 0.0]
+    };
+
+    // point light
+    u_lights_dat[3] = {
+        enabled: true,
+        position: [1.5, -0.5, 0.0, 1.0],
+        color: [0.0, 0.3, 0.0]
+    };
+
+    for (var i = 0; i < u_lights_loc.length; i++) {
+        gl.uniform1i(u_lights_loc[i].enabled, u_lights_dat[i].enabled ); 
+        gl.uniform4fv(u_lights_loc[i].position, u_lights_dat[i].position);
+        gl.uniform3fv(u_lights_loc[i].color, u_lights_dat[i].color);
+
+        if (Object.hasOwn(u_lights_dat[i], "spotDirection")) { // set spotlight values
+            gl.uniform3fv(u_lights_loc[i].spotDirection, u_lights_dat[i].spotDirection);
+            gl.uniform1f(u_lights_loc[i].spotCutoff, u_lights_dat[i].spotCutoff);
+            gl.uniform1f(u_lights_loc[i].spotExponent, u_lights_dat[i].spotExponent);
+        }
+    }
+
+    index_buffer = gl.createBuffer();
+
+    u_modelview_dat = rotator.getViewMatrix();
+    modelviewStack = [];
+    rotateX = rotateY = rotateZ = 0.0;
+    gl.uniformMatrix4fv(u_modelview_loc, false, u_modelview_dat);
 
     u_projection_dat = mat4.create();
-    mat4.perspective(u_projection_dat, Math.PI/4, aspect, 0.1, 5);
-    gl.uniformMatrix4fv(u_modelview_loc, false, u_modelview_dat);
+    mat4.perspective(u_projection_dat, Math.PI/4, aspect, 0.1, 10);
     gl.uniformMatrix4fv(u_projection_loc, false, u_projection_dat);
-
-    u_transformMatrix_dat = mat4.create();
-    // move the scene into viewable range
-    mat4.translate(u_transformMatrix_dat, u_transformMatrix_dat, [0, 0, -3, 0]);
-    mat4.scale(u_transformMatrix_dat, u_transformMatrix_dat, [1, 1, 1]);
-    gl.uniformMatrix4fv(u_transformMatrix_loc, false, u_transformMatrix_dat);
-
-    transformMatrixStack = [];
-
-    rotator = new SimpleRotator(canvas, rotatorCallback, 10);
 
     frameTime = 1000;
     lastT = now.getMilliseconds() - frameTime; // ensure the first iteration doesn't wait
     animating = true;
     fpsSlider = document.getElementById('fps-slider');
 
-    a_color_dat = gl.createBuffer();
+    u_fragColor_dat = gl.createBuffer();
     a_position_dat = gl.createBuffer();
+    a_normal_dat = gl.createBuffer();
+
+
+    /////
+    //u_diffuseColor_loc = gl.getUniformLocation(shaderProgram, "diffuseColor");
+    //u_specularColor_loc = gl.getUniformLocation(shaderProgram, "specularColor");
+    //u_specularExponent_loc = gl.getUniformLocation(shaderProgram, "specularExponent");
+    //u_lightPosition_loc = gl.getUniformLocation(shaderProgram, "lightPosition");
+    ///////
+
+    //gl.uniform3f(u_specularColor_loc, 0.5, 0.5, 0.5);
+    //gl.uniform4f(u_diffuseColor_loc, 1, 1, 1, 1);
+    //gl.uniform1f(u_specularExponent_loc, 10);
+    //gl.uniform4f(u_lightPosition_loc, -0.85, 0.8, 0.3, 1);
 
     defineBasicTriangle();
     defineTriangleShape();
@@ -432,6 +535,8 @@ async function init() {
     vertexShaderSource = await loadShaderText("./shaders/vertexShader.glsl");
     fragmentShaderSource = await loadShaderText("./shaders/fragmentShader.glsl");
     initGL();
+
+    document.addEventListener("keydown", keyListener, false);
 }
 
 window.onload = init;

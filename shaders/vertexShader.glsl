@@ -4,30 +4,25 @@
    precision mediump float;
 #endif
 
-uniform mat4 transformMatrix;
+uniform bool textured;
 uniform mat4 modelview;
 uniform mat4 projection;
-uniform bool textured;
 
-attribute vec2 tex_coords;
-attribute vec4 color;
 attribute vec3 position;
+attribute vec3 a_normal;
+attribute vec2 tex_coords;
 
-varying vec4 fragColor;
+varying vec3 v_eyeCoords;
+varying vec3 v_normal;
 varying vec2 uv_coords;
 
-varying vec3 transformMat_display;
-
 void main() {
-    mat4 modelviewProjection = projection * modelview;
-    vec4 transformedPos = transformMatrix * vec4(position, 1.0);
-
-    // how to debug shaders apparently
-    //transformMat_display = vec3(transformMat[0][0], transformMat[1][1], transformMat[2][2]);
+    vec4 coords = vec4(position, 1.0);
+    vec4 eyeCoords = modelview * coords;
 
     uv_coords = tex_coords;
-    fragColor = color;
-    //fragColor = vec4(1.0);
-    //gl_Position = modelviewProjection * transformedPos;
-    gl_Position = projection * modelview * transformMatrix * vec4(position, 1.0);
+    v_normal = normalize(a_normal);
+    v_eyeCoords = eyeCoords.xyz/eyeCoords.w;
+
+    gl_Position = projection * eyeCoords;
 }
