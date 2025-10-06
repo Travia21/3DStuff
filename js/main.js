@@ -1,6 +1,6 @@
 "use strict";
 
-import * as SHAPES from "./objects/shapes";
+import * as SHAPES from "./objects/shapes.js";
 
 // unfortunately necessary until I figure out how JS actually works
 const { mat2, mat2d, mat3, mat4, quat, quat2, vec2, vec3, vec4 } = glMatrix;
