@@ -371,11 +371,11 @@ function keyListener(event) {
         case 40: rotateX = (rotateX + 0.05) % (2*Math.PI); break;        // down arrow
         case 33: rotateZ = (rotateZ + 0.05) % (2*Math.PI); break;        // PageUp
         case 34: rotateZ = (rotateZ - 0.05) % (2*Math.PI); break;        // PageDown
-        case 13:                                // return key
+        case 13: break;                               // return key
         case 36: rotateX = rotateY = rotateZ = 0; break;  // home key
         default: {
-            event.preventDefault();
-            console.log("key: ", event.keyCode);
+            //event.preventDefault();
+            //console.log("key: ", event.keyCode);
             return;
         }
     }
