@@ -36,7 +36,8 @@ var modelview_start, projection_start;
 var u_fragColor_loc, a_position_loc;
 var u_fragColor_dat, a_position_dat;
 var u_textured_loc, u_sampler_loc;
-var u_texCoords_loc;
+var u_texCube_loc, u_samplerCube_loc;
+var a_texCoords_loc, a_texCoords_dat;
 var u_normalMatrix_dat, u_normalMatrix_loc;
 var u_lit_loc;
 var u_lights_loc, u_lights_dat;
@@ -44,14 +45,19 @@ var u_frontMaterial_loc, u_backMaterial_loc;
 
 var triangleIFSBuffer;
 var trianglePosBuffer;
-
+var triangle_tex_pos_buffer;
 function defineTriangleShape() {
     triangleIFSBuffer = gl.createBuffer();
     trianglePosBuffer = gl.createBuffer();
+    triangle_tex_pos_buffer = gl.createBuffer();
 
     gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, triangleIFSBuffer);
     const indexedFaceSet = new Uint8Array([0, 1, 2]);
     gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, indexedFaceSet, gl.STATIC_DRAW);
+
+    gl.bindBuffer(gl.ARRAY_BUFFER, triangle_tex_pos_buffer);
+    gl.bufferData(gl.ARRAY_BUFFER,
+        new Float32Array([0.0, 0.0,  1.0, 0.0,  0.5, 1.0]), gl.STATIC_DRAW);
 
     gl.bindBuffer(gl.ARRAY_BUFFER, trianglePosBuffer);
     const triangleVertices = new Float32Array([
@@ -62,14 +68,46 @@ function defineTriangleShape() {
     gl.bufferData(gl.ARRAY_BUFFER, triangleVertices, gl.STATIC_DRAW);
 }
 
+function drawSample() {
+    modelviewStack.push(mat4.clone(u_modelview_dat));
+    gl.enableVertexAttribArray(a_texCoords_loc);
+    gl.enableVertexAttribArray(a_position_loc);
+    gl.uniform1i(u_lit_loc, false);
+
+    const testing = gl.getUniformLocation(shaderProgram, "testing");
+    gl.uniform1i(testing, true);
+
+    gl.uniform1i(u_samplerCube_loc, 1);
+    gl.uniform1i(u_sampler_loc, 0);
+
+    gl.bindBuffer(gl.ARRAY_BUFFER, triangle_tex_pos_buffer);
+    gl.vertexAttribPointer(a_texCoords_loc, 2, gl.FLOAT, false, 0, 0);
+
+    gl.bindBuffer(gl.ARRAY_BUFFER, trianglePosBuffer);
+    gl.vertexAttribPointer(a_position_loc, 3, gl.FLOAT, false, 0, 0);
+    gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, triangleIFSBuffer);
+
+    gl.uniformMatrix4fv(u_modelview_loc, false, u_modelview_dat);
+    gl.drawElements(gl.TRIANGLES, 3, gl.UNSIGNED_BYTE, 0);
+
+    gl.uniform1i(testing, false);
+    gl.disableVertexAttribArray(a_position_loc);
+    gl.disableVertexAttribArray(a_texCoords_loc);
+    u_modelview_dat = modelviewStack.pop();
+}
+
 function drawTriangle(position, rotation) {
     modelviewStack.push(mat4.clone(u_modelview_dat));
-    gl.enableVertexAttribArray(u_texCoords_loc);
+    gl.enableVertexAttribArray(a_texCoords_loc);
     gl.enableVertexAttribArray(a_position_loc);
+    gl.uniform1i(u_lit_loc, false);
     gl.uniform1i(u_textured_loc, true);
 
-    u_sampler_loc = gl.getUniformLocation(shaderProgram, "u_texture");
+    gl.uniform1i(u_samplerCube_loc, 1);
     gl.uniform1i(u_sampler_loc, 0);
+
+    gl.bindBuffer(gl.ARRAY_BUFFER, triangle_tex_pos_buffer);
+    gl.vertexAttribPointer(a_texCoords_loc, 2, gl.FLOAT, false, 0, 0);
 
     gl.bindBuffer(gl.ARRAY_BUFFER, trianglePosBuffer);
     gl.vertexAttribPointer(a_position_loc, 3, gl.FLOAT, false, 0, 0);
@@ -84,8 +122,48 @@ function drawTriangle(position, rotation) {
 
     gl.uniform1i(u_textured_loc, false);
     gl.disableVertexAttribArray(a_position_loc);
-    gl.disableVertexAttribArray(u_texCoords_loc);
+    gl.disableVertexAttribArray(a_texCoords_loc);
     u_modelview_dat = modelviewStack.pop();
+}
+
+var a_normal_loc;
+var a_normal_dat, index_buffer;
+function drawModel(modelData, /** @type {bool} */ splines) {
+    gl.enableVertexAttribArray(a_position_loc);
+    gl.enableVertexAttribArray(a_normal_loc);
+
+    gl.bindBuffer(gl.ARRAY_BUFFER, a_position_dat);
+    gl.bufferData(gl.ARRAY_BUFFER, modelData.vertexPositions, gl.STATIC_DRAW);
+    gl.vertexAttribPointer(a_position_loc, 3, gl.FLOAT, false, 0, 0);
+
+    gl.bindBuffer(gl.ARRAY_BUFFER, a_texCoords_dat);
+    gl.bufferData(gl.ARRAY_BUFFER, modelData.vertexTextureCoords, gl.STATIC_DRAW);
+    gl.vertexAttribPointer(a_texCoords_loc, 2, gl.FLOAT, false, 0, 0);
+
+    gl.bindBuffer(gl.ARRAY_BUFFER, a_normal_dat);
+    gl.bufferData(gl.ARRAY_BUFFER, modelData.vertexNormals, gl.STATIC_DRAW);
+    gl.vertexAttribPointer(a_normal_loc, 3, gl.FLOAT, false, 0, 0);
+
+    gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, index_buffer);
+    gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, modelData.indices, gl.STATIC_DRAW);
+
+    mat3.normalFromMat4(u_normalMatrix_dat, u_modelview_dat);
+    gl.uniformMatrix3fv(u_normalMatrix_loc, false, u_normalMatrix_dat);
+    gl.uniformMatrix4fv(u_projection_loc, false, u_projection_dat);
+
+    gl.uniformMatrix4fv(u_modelview_loc, false, u_modelview_dat);
+    gl.drawElements(gl.TRIANGLES, modelData.indices.length, gl.UNSIGNED_SHORT, 0);
+
+    if (splines) {
+        gl.enable(gl.POLYGON_OFFSET_FILL);
+        gl.polygonOffset(1,1);
+        gl.uniform3f(u_frontMaterial_loc.diffuseColor, 0,0,0,1);
+        gl.drawElements(gl.LINES, modelData.indices.length, gl.UNSIGNED_SHORT, 0);
+        gl.disable(gl.POLYGON_OFFSET_FILL);
+    }
+
+    gl.disableVertexAttribArray(a_position_loc);
+    gl.disableVertexAttribArray(a_normal_loc);
 }
 
 // Template function, please ignore
@@ -108,16 +186,34 @@ function drawObject(position, rotation) {
 }
 
 function drawCube(side, position, rotation) {
+    // HEADER
     modelviewStack.push(mat4.clone(u_modelview_dat));
     gl.enable(gl.CULL_FACE);
     gl.uniform1i(u_lit_loc, true);
 
+    const cube = SHAPES.cube(side);
+
+    // Set texture bools
+    gl.uniform1i(u_textured_loc, true);
+    gl.enableVertexAttribArray(a_texCoords_loc);
+    gl.uniform1i(u_texCube_loc, true);
+
+    // texture settings
+    gl.uniform1i(u_samplerCube_loc, 1);
+
+    // Transform and Draw
     mat4.translate(u_modelview_dat, u_modelview_dat, position);
     mat4.rotateX(u_modelview_dat, u_modelview_dat, rotation[0]);
     mat4.rotateY(u_modelview_dat, u_modelview_dat, rotation[1]);
     mat4.rotateZ(u_modelview_dat, u_modelview_dat, rotation[2]);
-    drawModel(SHAPES.cube(side), false);
+    drawModel(cube, false);
 
+    // Unset texture bools
+    gl.uniform1i(u_texCube_loc, false);
+    gl.disableVertexAttribArray(a_texCoords_loc);
+    gl.uniform1i(u_textured_loc, false);
+
+    // FOOTER
     gl.uniform1i(u_lit_loc, false);
     gl.disable(gl.CULL_FACE);
     u_modelview_dat = modelviewStack.pop();
@@ -127,12 +223,26 @@ function drawRectanguloid(width, height, depth, position, rotation) {
     modelviewStack.push(mat4.clone(u_modelview_dat));
     gl.enable(gl.CULL_FACE);
     gl.uniform1i(u_lit_loc, true);
+    
+    // Set texture bools
+    gl.uniform1i(u_textured_loc, true);
+    gl.enableVertexAttribArray(a_texCoords_loc);
+
+    // texture settings
+    gl.activeTexture(gl.TEXTURE3);
+    gl.bindTexture(gl.TEXTURE_2D, monitor_texture);
+    gl.uniform1i(u_samplerCube_loc, 1);
+    gl.uniform1i(u_sampler_loc, 3);
 
     mat4.translate(u_modelview_dat, u_modelview_dat, position);
     mat4.rotateX(u_modelview_dat, u_modelview_dat, rotation[0]);
     mat4.rotateY(u_modelview_dat, u_modelview_dat, rotation[1]);
     mat4.rotateZ(u_modelview_dat, u_modelview_dat, rotation[2]);
     drawModel(SHAPES.rectanguloid(width, height, depth), false);
+
+    // Unset texture bools
+    gl.disableVertexAttribArray(a_texCoords_loc);
+    gl.uniform1i(u_textured_loc, false);
 
     gl.uniform1i(u_lit_loc, false);
     gl.disable(gl.CULL_FACE);
@@ -162,6 +272,10 @@ function drawCylinder(radius, height, slices, noTop, noBottom, position, rotatio
     modelviewStack.push(mat4.clone(u_modelview_dat));
     gl.enable(gl.CULL_FACE);
     gl.uniform1i(u_lit_loc, true);
+
+    //handle stupid error
+    gl.uniform1i(u_samplerCube_loc, 1);
+    gl.uniform1i(u_sampler_loc, 0);
     
     mat4.translate(u_modelview_dat, u_modelview_dat, position);
     mat4.rotateX(u_modelview_dat, u_modelview_dat, rotation[0]);
@@ -179,6 +293,10 @@ function drawTorus(innerRadius, outerRadius, slices, stacks, position, rotation)
     modelviewStack.push(mat4.clone(u_modelview_dat));
     gl.enable(gl.CULL_FACE);
     gl.uniform1i(u_lit_loc, true);
+
+    //handle stupid error
+    gl.uniform1i(u_samplerCube_loc, 1);
+    gl.uniform1i(u_sampler_loc, 0);
 
     mat4.translate(u_modelview_dat, u_modelview_dat, position);
     mat4.rotateX(u_modelview_dat, u_modelview_dat, rotation[0]);
@@ -231,23 +349,38 @@ function drawCoolThing(position, rotation) {
 
     // I gave up on the arms rotation after I learned what quaternions are for
     // I'll have to learn them later.
+    //
+    // Instead, I'm manually defining the order of rotations, which isn't very
+    // structured and will quickly explode the complexity of the project.
+    //
+    // Luckily, quaternions weren't a requirement for this project.
     //arm1
+    cyl_rad = 0.01;
     cyl_pos = [
-        (cyl_hgt/2) - 0.675,
-        (cyl_rad/2) + 0.525,
+        (cyl_hgt/2) - 0.7125,
+        (cyl_rad/2) + 0.625,
         0
     ];
-    cyl_rot = [0, Math.PI/2, 0];
-    drawCylinder(cyl_rad, cyl_hgt, 32, false, false, cyl_pos, cyl_rot);
+    modelviewStack.push(mat4.clone(u_modelview_dat));
+    mat4.translate(u_modelview_dat, u_modelview_dat, cyl_pos);
+    mat4.rotateZ(u_modelview_dat, u_modelview_dat, 15);
+    mat4.rotateY(u_modelview_dat, u_modelview_dat, Math.PI/2);
+    mat4.rotateX(u_modelview_dat, u_modelview_dat, Math.PI/2);
+    drawCylinder(cyl_rad, cyl_hgt, 32, false, false, [0,0,0], [0,0,0]);
+    u_modelview_dat = modelviewStack.pop();
 
     //arm2
     cyl_pos = [
-        (cyl_hgt/2) - cyl_hgt - 0.825,
-        (cyl_rad/2) + 0.525,
+        (cyl_hgt/2) - cyl_hgt - 0.7825,
+        (cyl_rad/2) + 0.625,
         0
     ];
-    cyl_rot = [0, Math.PI/2, 0];
-    drawCylinder(cyl_rad, cyl_hgt, 32, false, false, cyl_pos, cyl_rot);
+    mat4.translate(u_modelview_dat, u_modelview_dat, cyl_pos);
+    mat4.rotateZ(u_modelview_dat, u_modelview_dat, -15);
+    mat4.rotateY(u_modelview_dat, u_modelview_dat, Math.PI/2);
+    mat4.rotateX(u_modelview_dat, u_modelview_dat, Math.PI/2);
+    //drawCylinder(cyl_rad, cyl_hgt, 32, false, false, cyl_pos, cyl_rot);
+    drawCylinder(cyl_rad, cyl_hgt, 32, false, false, [0,0,0], [0,0,0]);
 
     // FOOTER
     gl.uniform1i(u_lit_loc, false);
@@ -268,7 +401,7 @@ var frameTime;
 var lastT, dT;
 
 /** @type {HTMLElement} */
-var fpsSlider, rotSlider;
+var fpsSlider, rotSlider, torus_slider;
 
 /**
  * Animation handling function
@@ -284,6 +417,7 @@ async function animate() {
 
     if (!animating) { return; }
 
+    drawMonitorTexture();
     draw();
 
     // I don't want weird floating point errors accumulating at any point
@@ -292,6 +426,7 @@ async function animate() {
     requestAnimationFrame(animate);
 }
 
+var monitor_texture;
 function draw() {
     gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
     u_modelview_dat = rotator.getViewMatrix();
@@ -320,6 +455,7 @@ function draw() {
         }
     }
 
+    // basic white texture
     gl.uniform3f( u_frontMaterial_loc.diffuseColor, 1.0, 1.0, 1.0 );
     gl.uniform3f( u_frontMaterial_loc.specularColor, 0.2, 0.2, 0.2 );
     gl.uniform1f( u_frontMaterial_loc.specularExponent, 32 );
@@ -333,45 +469,10 @@ function draw() {
     drawCylinder(0.02, 0.6, 32, false, false, [0, 0, 0], [Math.PI/2, 0, 0]);
     drawTorus(0.2, 0.1, 32, 16, [0, 0, 0], [Math.PI/2, 0, 0]);
 
+    // My face
     drawCoolThing([0, 0, 0], [0, 0, 0]);
 
     drawRectanguloid(0.3, 0.3, 0.1, [-0.48, -0.32, +1.8], [0, 0, 0]);
-}
-
-var a_normal_loc;
-var a_normal_dat, index_buffer;
-function drawModel(modelData, /** @type {bool} */ splines) {
-    gl.enableVertexAttribArray(a_position_loc);
-    gl.enableVertexAttribArray(a_normal_loc);
-
-    gl.bindBuffer(gl.ARRAY_BUFFER, a_position_dat);
-    gl.bufferData(gl.ARRAY_BUFFER, modelData.vertexPositions, gl.STATIC_DRAW);
-    gl.vertexAttribPointer(a_position_loc, 3, gl.FLOAT, false, 0, 0);
-
-    gl.bindBuffer(gl.ARRAY_BUFFER, a_normal_dat);
-    gl.bufferData(gl.ARRAY_BUFFER, modelData.vertexNormals, gl.STATIC_DRAW);
-    gl.vertexAttribPointer(a_normal_loc, 3, gl.FLOAT, false, 0, 0);
-
-    gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, index_buffer);
-    gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, modelData.indices, gl.STATIC_DRAW);
-
-    mat3.normalFromMat4(u_normalMatrix_dat, u_modelview_dat);
-    gl.uniformMatrix3fv(u_normalMatrix_loc, false, u_normalMatrix_dat);
-    gl.uniformMatrix4fv(u_projection_loc, false, u_projection_dat);
-
-    gl.uniformMatrix4fv(u_modelview_loc, false, u_modelview_dat);
-    gl.drawElements(gl.TRIANGLES, modelData.indices.length, gl.UNSIGNED_SHORT, 0);
-
-    if (splines) {
-        gl.enable(gl.POLYGON_OFFSET_FILL);
-        gl.polygonOffset(1,1);
-        gl.uniform3f(u_frontMaterial_loc.diffuseColor, 0,0,0,1);
-        gl.drawElements(gl.LINES, modelData.indices.length, gl.UNSIGNED_SHORT, 0);
-        gl.disable(gl.POLYGON_OFFSET_FILL);
-    }
-
-    gl.disableVertexAttribArray(a_position_loc);
-    gl.disableVertexAttribArray(a_normal_loc);
 }
 
 function resetScene() {
@@ -509,7 +610,9 @@ function compileAndLink(vertexSource, fragmentSource) {
 }
 
 /**************************** Texture Loading ********************************/
+var texture_pos_buffer;
 function loadTextures() {
+    //TEXTURE9
     // magenta PLACEHOLDER
     const texPlaceholder = gl.createTexture();
     gl.activeTexture(gl.TEXTURE9);
@@ -523,21 +626,24 @@ function loadTextures() {
     const meURL = new URL("static/unnamed.jpg", document.baseURI).href;
     const cloverURL = new URL("static/Clover_teeth_removed_cropped.jpg", document.baseURI).href;
 
+    //TEXTURE0
     const texMe = gl.createTexture();
-    gl.activeTexture(gl.TEXTURE0);
-    loadImage(meURL, texMe);
+    gl.activeTexture(gl.TEXTURE0); // activate texture unit 0
+    loadImage(meURL, texMe); // load the image into the texture object
 
+    //TEXTURE1
     const texClover = gl.createTexture();
-    gl.activeTexture(gl.TEXTURE1); // activate texture unit 0
-    loadImage(cloverURL, texClover); // load the image into the texture object
+    gl.activeTexture(gl.TEXTURE1);
+    loadCubeImage(cloverURL, texClover);
 
-    // UV attribute
-    u_texCoords_loc = gl.getAttribLocation(shaderProgram, "tex_coords");
-    const texVBO = gl.createBuffer();
-    gl.bindBuffer(gl.ARRAY_BUFFER, texVBO);
+    //UV attributes
+    u_sampler_loc = gl.getUniformLocation(shaderProgram, "u_texture");
+    u_samplerCube_loc = gl.getUniformLocation(shaderProgram, "u_textureCube");
+    a_texCoords_loc = gl.getAttribLocation(shaderProgram, "tex_coords");
+    texture_pos_buffer = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, texture_pos_buffer);
     gl.bufferData(gl.ARRAY_BUFFER,
-        new Float32Array([0.0, 0.0,  1.0, 0.0,  0.5, 1.0]), gl.STATIC_DRAW);
-    gl.vertexAttribPointer(u_texCoords_loc, 2, gl.FLOAT, false, 0, 0);
+        new Float32Array([0.0, 0.0,  1.0, 0.0,  1.0, 1.0]), gl.STATIC_DRAW);
 }
 
 function loadImage(/** @type {URL} */ url, /** @type {WebGLTexture} */ textureObject) {
@@ -558,7 +664,76 @@ function loadImage(/** @type {URL} */ url, /** @type {WebGLTexture} */ textureOb
     image.src = url;
 }
 
+function loadCubeImage(/** @type {URL} */ url, /** @type {WebGLTexture} */ textureObject) {
+    const image = new Image();
+    const texUnit = gl.getParameter(gl.ACTIVE_TEXTURE);
+
+    image.onload = function() {
+        gl.activeTexture(texUnit);
+        gl.bindTexture(gl.TEXTURE_CUBE_MAP, textureObject);
+        try {
+            gl.texImage2D(gl.TEXTURE_CUBE_MAP_POSITIVE_X, 0, gl.RGBA, gl.RGBA,
+                gl.UNSIGNED_BYTE, image);
+            gl.texImage2D(gl.TEXTURE_CUBE_MAP_NEGATIVE_X, 0, gl.RGBA, gl.RGBA,
+                gl.UNSIGNED_BYTE, image);
+            gl.texImage2D(gl.TEXTURE_CUBE_MAP_POSITIVE_Y, 0, gl.RGBA, gl.RGBA,
+                gl.UNSIGNED_BYTE, image);
+            gl.texImage2D(gl.TEXTURE_CUBE_MAP_NEGATIVE_Y, 0, gl.RGBA, gl.RGBA,
+                gl.UNSIGNED_BYTE, image);
+            gl.texImage2D(gl.TEXTURE_CUBE_MAP_POSITIVE_Z, 0, gl.RGBA, gl.RGBA,
+                gl.UNSIGNED_BYTE, image);
+            gl.texImage2D(gl.TEXTURE_CUBE_MAP_NEGATIVE_Z, 0, gl.RGBA, gl.RGBA,
+                gl.UNSIGNED_BYTE, image);
+        } catch (e) {
+            console.error("Error loading cubemap\n", e);
+            return;
+        }
+        gl.generateMipmap(gl.TEXTURE_CUBE_MAP);
+    }
+
+    image.src = url;
+}
+
+// I may need a depth buffer for this
+function drawMonitorTexture() {
+    gl.bindFramebuffer(gl.FRAMEBUFFER, monitor_framebuffer);
+
+    // HEADER
+    gl.useProgram(shaderProgram);
+    gl.clearColor(1.0, 1.0, 1.0, 1.0);
+    gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+    gl.viewport(0, 0, 512, 512);
+    gl.enable(gl.BLEND);
+
+    modelviewStack.push(mat4.clone(u_modelview_dat));
+
+    // I'm not sure if the perspective has to change,
+    // but I'll leave this here for now
+    mat4.perspective(u_projection_dat, Math.PI/4, aspect, 0.1, 10);
+    gl.uniformMatrix4fv(u_projection_loc, false, u_projection_dat);
+
+    mat4.rotateX(u_modelview_dat, modelview_start, ((2*Math.PI)/torus_slider.value));
+    gl.uniformMatrix4fv(u_modelview_loc, false, u_modelview_dat);
+    
+    // draw stuff
+    drawTorus(0.5, 0.1, 32, 16, [0,0,0], [0,0,0]);
+    //drawSample();
+
+    u_modelview_dat = modelviewStack.pop();
+
+    //saveMonitorTextureAsImage();
+
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+
+    // FOOTER
+    gl.disable(gl.BLEND);
+    gl.viewport(0, 0, canvas.clientWidth, canvas.clientHeight);
+    gl.clearColor(0.0, 0.0, 0.0, 1.0);
+    gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+}
+
 /**************************** Init Functions **********************************/
+var monitor_framebuffer;
 function initGL() {
     now = new Date();
     window.addEventListener('resize', resize);
@@ -579,6 +754,7 @@ function initGL() {
     u_modelview_loc = gl.getUniformLocation(shaderProgram, "modelview");
     u_projection_loc = gl.getUniformLocation(shaderProgram, "projection");
     u_textured_loc = gl.getUniformLocation(shaderProgram, "textured");
+    u_texCube_loc = gl.getUniformLocation(shaderProgram, "texCube");
     u_sampler_loc = gl.getUniformLocation(shaderProgram, "u_texture");
 
     u_lit_loc = gl.getUniformLocation(shaderProgram, "lit");
@@ -606,12 +782,13 @@ function initGL() {
         specularExponent: gl.getUniformLocation(shaderProgram, "backMaterial.specularExponent")
     };
 
-    u_fragColor_loc = gl.getAttribLocation(shaderProgram, "fragColor");
+    u_fragColor_loc = gl.getUniformLocation(shaderProgram, "fragColor");
     a_position_loc = gl.getAttribLocation(shaderProgram, "position");
     a_normal_loc = gl.getAttribLocation(shaderProgram, "a_normal");
     u_normalMatrix_loc = gl.getUniformLocation(shaderProgram, "normalMatrix");
 
     u_normalMatrix_dat = mat3.create();
+    a_texCoords_dat = gl.createBuffer();
 
     u_lights_dat = [];
     // Eye camera point light
@@ -659,6 +836,24 @@ function initGL() {
 
     index_buffer = gl.createBuffer();
 
+    gl.activeTexture(gl.TEXTURE3);
+    monitor_texture = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_2D, monitor_texture);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, 512, 512, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+
+    monitor_framebuffer = gl.createFramebuffer();
+    gl.bindFramebuffer(gl.FRAMEBUFFER, monitor_framebuffer);
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D,
+        monitor_texture, 0);
+
+    if (gl.getError() != gl.NO_ERROR) {
+        throw "Framebuffer creation error";
+    }
+
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+
     u_modelview_dat = rotator.getViewMatrix();
     modelviewStack = [];
     rotateX = rotateY = rotateZ = 0.0;
@@ -677,6 +872,7 @@ function initGL() {
     animating = true;
     fpsSlider = document.getElementById('fps-slider');
     rotSlider = document.getElementById('rotation-slider');
+    torus_slider = document.getElementById('torus-slider');
 
     modelview_start = structuredClone(u_modelview_dat);
     projection_start = structuredClone(u_projection_dat);
@@ -684,6 +880,7 @@ function initGL() {
     defineTriangleShape();
     loadTextures();
     handleButtons();
+    drawMonitorTexture();
     animate();
 }
 
@@ -714,6 +911,49 @@ async function init() {
     initGL();
 
     document.addEventListener("keydown", keyListener, false);
+}
+
+function saveMonitorTextureAsImage() {
+    const width = 512;
+    const height = 512;
+
+    // 1. Bind the framebuffer that rendered into monitor_texture
+    gl.bindFramebuffer(gl.FRAMEBUFFER, monitor_framebuffer);
+
+    // 2. Read pixels from GPU into CPU memory
+    const pixels = new Uint8Array(width * height * 4);
+    gl.readPixels(0, 0, width, height, gl.RGBA, gl.UNSIGNED_BYTE, pixels);
+
+    // 3. Create a 2D canvas to draw the pixels
+    const canvas2D = document.createElement('canvas');
+    canvas2D.width = width;
+    canvas2D.height = height;
+    const ctx = canvas2D.getContext('2d');
+
+    // 4. WebGL origin is bottom-left; Canvas origin is top-left.
+    // We must flip the rows vertically.
+    const imageData = ctx.createImageData(width, height);
+    for (let y = 0; y < height; y++) {
+        const srcStart = (height - y - 1) * width * 4;
+        const destStart = y * width * 4;
+        imageData.data.set(pixels.subarray(srcStart, srcStart + width * 4), destStart);
+    }
+
+    ctx.putImageData(imageData, 0, 0);
+
+    // 5. Convert the canvas to a data URL (or Blob)
+    const dataURL = canvas2D.toDataURL("image/png");
+
+    // (optional) trigger download
+    const link = document.createElement('a');
+    link.download = 'monitor_texture.png';
+    link.href = dataURL;
+    link.click();
+
+    // Unbind framebuffer so we don't mess up rendering
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+
+    return dataURL;
 }
 
 window.onload = init;
