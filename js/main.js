@@ -427,7 +427,7 @@ async function animate() {
 }
 
 var monitor_texture;
-function draw() {
+function draw( rendered = false ) {
     gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
     u_modelview_dat = rotator.getViewMatrix();
     // Apply manual rotations from keyboard
@@ -435,6 +435,18 @@ function draw() {
     mat4.rotateY(u_modelview_dat, u_modelview_dat, rotateY);
     mat4.rotateZ(u_modelview_dat, u_modelview_dat, rotateZ);
     gl.uniformMatrix4fv(u_modelview_loc, false, u_modelview_dat);
+
+    // update point light
+    u_lights_dat[3] = {
+        enabled: true,
+        position: [
+            2.0 + (point_x.value/2.0),
+            0.5 + (point_y.value/2.0),
+            0.0 + (point_z.value/2.0),
+            1.0
+        ],
+        color: [0.0, 1.0, 0.0]
+    };
 
     // Transform light coordinates and spotlight directions
     // to eye coordinates
@@ -472,7 +484,9 @@ function draw() {
     // My face
     drawCoolThing([0, 0, 0], [0, 0, 0]);
 
-    drawRectanguloid(0.3, 0.3, 0.1, [-0.48, -0.32, +1.8], [0, 0, 0]);
+    if (!rendered) {
+        drawRectanguloid(0.3, 0.3, 0.1, [-0.48, -0.32, +1.8], [0, 0, 0]);
+    }
 }
 
 function resetScene() {
@@ -530,7 +544,17 @@ function lightButton(event) {
     draw();
 }
 
+var point_x, point_y, point_z, point_a;
 function handleButtons() {
+    fpsSlider = document.getElementById('fps-slider');
+    rotSlider = document.getElementById('rotation-slider');
+    torus_slider = document.getElementById('torus-slider');
+
+    point_x = document.getElementById('point-x');
+    point_y = document.getElementById('point-y');
+    point_z = document.getElementById('point-z');
+    point_a = document.getElementById('point-a');
+
     document.getElementById("animate-btn").addEventListener("click", animateButton);
     document.getElementById("reset-btn").addEventListener("click", resetButton);
 
@@ -705,6 +729,9 @@ function drawMonitorTexture() {
     gl.viewport(0, 0, 512, 512);
     gl.enable(gl.BLEND);
 
+    // I need to fix the rendering here when trying to re-render the scene.
+    // It maintains the modelview from the actual scene, rather than obeying
+    // torus_slider.
     modelviewStack.push(mat4.clone(u_modelview_dat));
 
     // I'm not sure if the perspective has to change,
@@ -717,6 +744,7 @@ function drawMonitorTexture() {
     
     // draw stuff
     drawTorus(0.5, 0.1, 32, 16, [0,0,0], [0,0,0]);
+    //draw(true);
     //drawSample();
 
     u_modelview_dat = modelviewStack.pop();
@@ -870,9 +898,6 @@ function initGL() {
     frameTime = 1000;
     lastT = now.getMilliseconds() - frameTime; // ensure the first iteration doesn't wait
     animating = true;
-    fpsSlider = document.getElementById('fps-slider');
-    rotSlider = document.getElementById('rotation-slider');
-    torus_slider = document.getElementById('torus-slider');
 
     modelview_start = structuredClone(u_modelview_dat);
     projection_start = structuredClone(u_projection_dat);
