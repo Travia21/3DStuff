@@ -920,9 +920,9 @@ async function init() {
             depth: true,
             antialias: true
         };
-        //gl = canvas.getContext('webgl2', canvas_options)
-        //    || canvas.getContext('webgl', canvas_options);
-        gl = canvas.getContext('webgl', canvas_options);
+        gl = canvas.getContext('webgl2', canvas_options)
+            || canvas.getContext('webgl', canvas_options);
+        //gl = canvas.getContext('webgl', canvas_options);
         if (!gl) { throw new Error("WebGL is not supported by this browser."); }
     } catch (e) {
         console.error(
