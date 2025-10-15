@@ -46,6 +46,9 @@ var u_frontMaterial_loc, u_backMaterial_loc;
 var triangleIFSBuffer;
 var trianglePosBuffer;
 var triangle_tex_pos_buffer;
+/**
+  * I think this needs to be removed to a single function for the triangle
+  */
 function defineTriangleShape() {
     triangleIFSBuffer = gl.createBuffer();
     trianglePosBuffer = gl.createBuffer();
@@ -68,34 +71,9 @@ function defineTriangleShape() {
     gl.bufferData(gl.ARRAY_BUFFER, triangleVertices, gl.STATIC_DRAW);
 }
 
-function drawSample() {
-    modelviewStack.push(mat4.clone(u_modelview_dat));
-    gl.enableVertexAttribArray(a_texCoords_loc);
-    gl.enableVertexAttribArray(a_position_loc);
-    gl.uniform1i(u_lit_loc, false);
-
-    const testing = gl.getUniformLocation(shaderProgram, "testing");
-    gl.uniform1i(testing, true);
-
-    gl.uniform1i(u_samplerCube_loc, 1);
-    gl.uniform1i(u_sampler_loc, 0);
-
-    gl.bindBuffer(gl.ARRAY_BUFFER, triangle_tex_pos_buffer);
-    gl.vertexAttribPointer(a_texCoords_loc, 2, gl.FLOAT, false, 0, 0);
-
-    gl.bindBuffer(gl.ARRAY_BUFFER, trianglePosBuffer);
-    gl.vertexAttribPointer(a_position_loc, 3, gl.FLOAT, false, 0, 0);
-    gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, triangleIFSBuffer);
-
-    gl.uniformMatrix4fv(u_modelview_loc, false, u_modelview_dat);
-    gl.drawElements(gl.TRIANGLES, 3, gl.UNSIGNED_BYTE, 0);
-
-    gl.uniform1i(testing, false);
-    gl.disableVertexAttribArray(a_position_loc);
-    gl.disableVertexAttribArray(a_texCoords_loc);
-    u_modelview_dat = modelviewStack.pop();
-}
-
+/**
+  * Draws the triangle with my face on it
+  */
 function drawTriangle(position, rotation) {
     modelviewStack.push(mat4.clone(u_modelview_dat));
     gl.enableVertexAttribArray(a_texCoords_loc);
@@ -249,7 +227,11 @@ function drawRectanguloid(width, height, depth, position, rotation) {
     u_modelview_dat = modelviewStack.pop();
 }
 
-function drawSphere(radius, slices, stacks, position, rotation) {
+var moon_pos;
+/**
+  * Draw a sphere and its orbiting moon
+  */
+function drawSphere(radius, slices, stacks, position, rotation, moon = false) {
     // HEADER
     modelviewStack.push(mat4.clone(u_modelview_dat));
     gl.enable(gl.CULL_FACE);
@@ -259,7 +241,23 @@ function drawSphere(radius, slices, stacks, position, rotation) {
     mat4.rotateX(u_modelview_dat, u_modelview_dat, rotation[0]);
     mat4.rotateY(u_modelview_dat, u_modelview_dat, rotation[1]);
     mat4.rotateZ(u_modelview_dat, u_modelview_dat, rotation[2]);
+
     drawModel(SHAPES.uvSphere(radius, slices, stacks), false);
+
+    if (!moon) {
+        moon_pos = vec3.create();
+        vec3.add(moon_pos, moon_pos, [
+            (radius + 0.01) * Math.cos(moon_angle),
+            0.0,
+            (radius + 0.01) * Math.sin(moon_angle),
+        ]);
+
+        mat4.rotateZ(u_modelview_dat, u_modelview_dat, -rotation[2]);
+        mat4.rotateY(u_modelview_dat, u_modelview_dat, -rotation[1]);
+        mat4.rotateX(u_modelview_dat, u_modelview_dat, -rotation[0]);
+
+        drawSphere(radius/3.0, slices, stacks, moon_pos, [0,0,0], true);
+    }
 
     // FOOTER
     gl.uniform1i(u_lit_loc, false);
@@ -388,9 +386,6 @@ function drawCoolThing(position, rotation) {
     u_modelview_dat = modelviewStack.pop();
 }
 
-/** @type {Date} */
-var now;
-
 /** @type {boolean} */
 var animating;
 
@@ -403,14 +398,16 @@ var lastT, dT;
 /** @type {HTMLElement} */
 var fpsSlider, rotSlider, torus_slider;
 
+var moon_angle = 0.0;
+
 /**
  * Animation handling function
- * , 1.0
  */
 async function animate() {
+    const now = performance.now();
     frameTime = 1000 / fpsSlider.value;
-    dT = now.getMilliseconds() - lastT;
-    lastT = now.getMilliseconds();
+    dT = now - lastT;
+    lastT = now;
     if (dT < frameTime) { // 1 second
         await new Promise(r => setTimeout(r, frameTime - dT));
     }
@@ -422,6 +419,7 @@ async function animate() {
 
     // I don't want weird floating point errors accumulating at any point
     rotateY = (rotateY + (rotSlider.value/1000)) % (2*Math.PI);
+    moon_angle = lastT/300 % (2*Math.PI);
 
     requestAnimationFrame(animate);
 }
@@ -477,7 +475,7 @@ function draw( rendered = false ) {
     gl.uniform1f( u_backMaterial_loc.specularExponent, 32 );
 
     drawCube(0.2, [-0.4, -0.1, +0.8], [0, 0, 0]);
-    drawSphere(0.2, 32, 16, [0.5, -0.5, 0], [Math.PI/7, 0, 0]);
+    drawSphere(0.2, 32, 16, [0.5, -0.5, 0], [0, 0, 0]);
     drawCylinder(0.02, 0.6, 32, false, false, [0, 0, 0], [Math.PI/2, 0, 0]);
     drawTorus(0.2, 0.1, 32, 16, [0, 0, 0], [Math.PI/2, 0, 0]);
 
@@ -544,6 +542,11 @@ function lightButton(event) {
     draw();
 }
 
+function torusSliderChange() {
+    drawMonitorTexture();
+    draw();
+}
+
 var point_x, point_y, point_z, point_a;
 function handleButtons() {
     fpsSlider = document.getElementById('fps-slider');
@@ -554,6 +557,8 @@ function handleButtons() {
     point_y = document.getElementById('point-y');
     point_z = document.getElementById('point-z');
     point_a = document.getElementById('point-a');
+
+    torus_slider.addEventListener('change', torusSliderChange);
 
     document.getElementById("animate-btn").addEventListener("click", animateButton);
     document.getElementById("reset-btn").addEventListener("click", resetButton);
@@ -763,7 +768,6 @@ function drawMonitorTexture() {
 /**************************** Init Functions **********************************/
 var monitor_framebuffer;
 function initGL() {
-    now = new Date();
     window.addEventListener('resize', resize);
     resize();
 
@@ -895,8 +899,6 @@ function initGL() {
     a_position_dat = gl.createBuffer();
     a_normal_dat = gl.createBuffer();
 
-    frameTime = 1000;
-    lastT = now.getMilliseconds() - frameTime; // ensure the first iteration doesn't wait
     animating = true;
 
     modelview_start = structuredClone(u_modelview_dat);

@@ -1,3 +1,5 @@
+#version 300 es
+
 #ifdef GL_FRAGMENT_PRECISION_HIGH
    precision highp float;
 #else
@@ -26,16 +28,17 @@ uniform samplerCube u_textureCube;
 uniform MaterialProperties frontMaterial;
 uniform MaterialProperties backMaterial;
 uniform bool lit;
-uniform vec3 fragColor;
 uniform LightProperties lights[4];
 uniform mat3 normalMatrix;
 
 uniform bool testing;
 
-varying vec2 uv_coords;
-varying vec3 obj_coords;
-varying vec3 v_normal;
-varying vec3 v_eyeCoords;
+in vec2 uv_coords;
+in vec3 obj_coords;
+in vec3 v_normal;
+in vec3 v_eyeCoords;
+
+layout(location=0) out vec4 fragColor;
 
 vec3 lightingEquation(LightProperties light,
                       MaterialProperties material,
@@ -79,21 +82,13 @@ vec3 lightingEquation(LightProperties light,
 }
 
 void main() {
+    fragColor = vec4(1.0, 0.0, 1.0, 1.0);
     if (testing) {
-        gl_FragColor = vec4(1.0, 0.0, 1.0, 1.0);
         return;
     }
 
-    //if (1==1) {
-    //    vec2 c = vec2(0.5, 0.5);
-    //    gl_FragColor = texture2D(u_texture, c);
-    //    return;
-    //}
-    // Object has no normals, it's the triangle
-    // Later WebGL's provide `isnan()`
-    if (v_normal.z == 0.0 || v_normal.z < 0.0 || v_normal.z > 0.0) {
-    } else {
-        gl_FragColor = texture2D(u_texture, uv_coords);
+    if (isnan(v_normal.z)) {
+        fragColor = texture(u_texture, uv_coords);
         return;
     }
 
@@ -102,30 +97,24 @@ void main() {
     vec3 normal = normalize(normalMatrix * v_normal);
     vec3 viewDirection = normalize(-v_eyeCoords);
 
-    // for simple 2D textures
     if (textured) {
-        // sample from u_texture @ (uv_coords.x, uv_coords.y)
         if (texCube) {
              // I don't know why the coords need to be flipped again
-            texColor = textureCube(u_textureCube, -obj_coords);
+            texColor = texture(u_textureCube, -obj_coords);
         } else {
-            if (v_normal.z > 0.99999)  { // 1.0 caused a weird glitch
-                texColor = texture2D(u_texture, uv_coords);
-                //gl_FragColor = texture2D(u_texture, uv_coords);
+            // rectanguloid display
+            if (v_normal.z > 0.99999)  {
+                fragColor = texture(u_texture, uv_coords);
+                return;
             }
         }
     }
-    //else {
-    //    gl_FragColor = vec4(1.0, 0.0, 1.0, 1.0);
-    //    return;
-    //}
 
     if (!lit) {
         if (textured) {
-            gl_FragColor = texColor;
+            fragColor = texColor;
             return;
         }
-        gl_FragColor = vec4(fragColor, 1.0);
         return;
     }
 
@@ -140,6 +129,6 @@ void main() {
     }
 
     vec3 finalRGB = texColor.rgb * lightColor;
-    gl_FragColor = vec4(finalRGB, 1.0);
+    fragColor = vec4(finalRGB, 1.0);
 }
 

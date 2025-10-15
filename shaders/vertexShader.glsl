@@ -1,3 +1,5 @@
+#version 300 es
+
 #ifdef GL_FRAGMENT_PRECISION_HIGH
    precision highp float;
 #else
@@ -8,14 +10,14 @@ uniform bool texCube;
 uniform mat4 modelview;
 uniform mat4 projection;
 
-attribute vec3 position;
-attribute vec3 a_normal;
-attribute vec2 tex_coords;
+in vec3 position;
+in vec3 a_normal;
+in vec2 tex_coords;
 
-varying vec3 v_eyeCoords;
-varying vec3 v_normal;
-varying vec2 uv_coords;
-varying vec3 obj_coords;
+out vec3 v_eyeCoords;
+out vec3 v_normal;
+out vec2 uv_coords;
+out vec3 obj_coords;
 
 void main() {
     vec4 coords = vec4(position, 1.0);
