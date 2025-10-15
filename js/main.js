@@ -247,9 +247,9 @@ function drawSphere(radius, slices, stacks, position, rotation, moon = false) {
     if (!moon) {
         moon_pos = vec3.create();
         vec3.add(moon_pos, moon_pos, [
-            (radius + 0.01) * Math.cos(moon_angle),
+            (radius + 0.1) * Math.cos(moon_angle),
             0.0,
-            (radius + 0.01) * Math.sin(moon_angle),
+            (radius + 0.1) * Math.sin(moon_angle),
         ]);
 
         mat4.rotateZ(u_modelview_dat, u_modelview_dat, -rotation[2]);
@@ -393,7 +393,7 @@ var animating;
 var frameTime;
 
 /** @type {Number} */
-var lastT, dT;
+var lastT, dT, write_T = 0, write_dT = 0;
 
 /** @type {HTMLElement} */
 var fpsSlider, rotSlider, torus_slider;
@@ -404,26 +404,64 @@ var moon_angle = 0.0;
  * Animation handling function
  */
 async function animate() {
-    const now = performance.now();
+    let now = performance.now();
     frameTime = 1000 / fpsSlider.value;
     dT = now - lastT;
     lastT = now;
-    if (dT < frameTime) { // 1 second
+    if (dT < frameTime) {
         await new Promise(r => setTimeout(r, frameTime - dT));
     }
 
     if (!animating) { return; }
-
+    now = performance.now();
+    
     drawMonitorTexture();
+
+    // All this blitting just because WebGL can't handle MSAA -> single sampled
+    // if the target is the default framebuffer
+    const rb_width = gl.getRenderbufferParameter(gl.RENDERBUFFER, gl.RENDERBUFFER_WIDTH);
+    const rb_height = gl.getRenderbufferParameter(gl.RENDERBUFFER, gl.RENDERBUFFER_HEIGHT);
+
+    gl.bindFramebuffer(gl.FRAMEBUFFER, scene_framebuffer);
+    gl.clearColor(0,0,0,1);
+    gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+    gl.viewport(0, 0, rb_width, rb_height);
+
     draw();
+
+    gl.bindFramebuffer(gl.READ_FRAMEBUFFER, scene_framebuffer);
+    gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, resolve_framebuffer);
+    gl.blitFramebuffer(
+        0, 0, rb_width, rb_height,
+        0, 0, rb_width, rb_height,
+        gl.COLOR_BUFFER_BIT,
+        gl.NEAREST
+    );
+
+    gl.bindFramebuffer(gl.READ_FRAMEBUFFER, resolve_framebuffer);
+    gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, null);
+    gl.clearColor(0,0,0,1);
+    gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+    gl.viewport(0, 0, canvas.width, canvas.height);
+
+    gl.blitFramebuffer(
+        0, 0, canvas.width, canvas.height,
+        0, 0, canvas.width, canvas.height,
+        gl.COLOR_BUFFER_BIT,
+        gl.NEAREST
+    );
+
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
 
     // I don't want weird floating point errors accumulating at any point
     rotateY = (rotateY + (rotSlider.value/1000)) % (2*Math.PI);
     moon_angle = lastT/300 % (2*Math.PI);
 
+    drawTime.textContent = Math.round(performance.now() - now);
     requestAnimationFrame(animate);
 }
 
+var torus_size, start, end;
 var monitor_texture;
 function draw( rendered = false ) {
     gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
@@ -436,7 +474,7 @@ function draw( rendered = false ) {
 
     // update point light
     u_lights_dat[3] = {
-        enabled: true,
+        enabled: u_lights_dat[3].enabled,
         position: [
             2.0 + (point_x.value/2.0),
             0.5 + (point_y.value/2.0),
@@ -474,10 +512,16 @@ function draw( rendered = false ) {
     gl.uniform3f( u_backMaterial_loc.specularColor, 0.1, 0.1, 0.1 );
     gl.uniform1f( u_backMaterial_loc.specularExponent, 32 );
 
+    const now = performance.now();
+    const c = (now % 8000) / 8000; // 0..1
+    const min = 0.05;
+    const max = 0.2;
+    const size = max * Math.abs(Math.sin(c * 2 * Math.PI)) + min; // sin(min..min+max)
+
     drawCube(0.2, [-0.4, -0.1, +0.8], [0, 0, 0]);
     drawSphere(0.2, 32, 16, [0.5, -0.5, 0], [0, 0, 0]);
     drawCylinder(0.02, 0.6, 32, false, false, [0, 0, 0], [Math.PI/2, 0, 0]);
-    drawTorus(0.2, 0.1, 32, 16, [0, 0, 0], [Math.PI/2, 0, 0]);
+    drawTorus(size * 2, size, 32, 16, [0, 0, 0], [Math.PI/2, 0, 0]);
 
     // My face
     drawCoolThing([0, 0, 0], [0, 0, 0]);
@@ -488,6 +532,7 @@ function draw( rendered = false ) {
 }
 
 function resetScene() {
+    /* reset logging
     const fmt = (v) => (v >= 0 ? `+${v.toFixed(3)}` : v.toFixed(3));
 
     console.log("Before Reset\n");
@@ -512,6 +557,7 @@ function resetScene() {
         ];
         console.log(`  [${row.join(", ")}]`);
     }
+    */
 
     rotateX = rotateY = rotateZ = 0;
     u_modelview_dat = structuredClone(modelview_start);
@@ -539,6 +585,7 @@ function lightButton(event) {
     const index = event.target.dataset.index;
     u_lights_dat[index].enabled = !u_lights_dat[index].enabled;
     gl.uniform1i(u_lights_loc[index].enabled, u_lights_dat[index].enabled);
+
     draw();
 }
 
@@ -547,11 +594,13 @@ function torusSliderChange() {
     draw();
 }
 
+var drawTime;
 var point_x, point_y, point_z, point_a;
 function handleButtons() {
     fpsSlider = document.getElementById('fps-slider');
     rotSlider = document.getElementById('rotation-slider');
     torus_slider = document.getElementById('torus-slider');
+    drawTime = document.getElementById('drawTime');
 
     point_x = document.getElementById('point-x');
     point_y = document.getElementById('point-y');
@@ -744,7 +793,8 @@ function drawMonitorTexture() {
     mat4.perspective(u_projection_dat, Math.PI/4, aspect, 0.1, 10);
     gl.uniformMatrix4fv(u_projection_loc, false, u_projection_dat);
 
-    mat4.rotateX(u_modelview_dat, modelview_start, ((2*Math.PI)/torus_slider.value));
+    const torus_rotation = torus_slider.value * ((2*Math.PI) / torus_slider.max);
+    mat4.rotateX(u_modelview_dat, modelview_start, torus_rotation);
     gl.uniformMatrix4fv(u_modelview_loc, false, u_modelview_dat);
     
     // draw stuff
@@ -753,20 +803,19 @@ function drawMonitorTexture() {
     //drawSample();
 
     u_modelview_dat = modelviewStack.pop();
-
-    //saveMonitorTextureAsImage();
-
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
 
     // FOOTER
-    gl.disable(gl.BLEND);
+    //gl.disable(gl.BLEND);
     gl.viewport(0, 0, canvas.clientWidth, canvas.clientHeight);
     gl.clearColor(0.0, 0.0, 0.0, 1.0);
     gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
 }
 
 /**************************** Init Functions **********************************/
+var scene_buffer, scene_depth, scene_framebuffer, resolve_framebuffer;
 var monitor_framebuffer;
+var resolve_texture;
 function initGL() {
     window.addEventListener('resize', resize);
     resize();
@@ -868,8 +917,37 @@ function initGL() {
 
     index_buffer = gl.createBuffer();
 
-    gl.activeTexture(gl.TEXTURE3);
+    //***** Set up whole scene texture/framebuffer *****//
+    scene_buffer = gl.createRenderbuffer();
+    gl.bindRenderbuffer(gl.RENDERBUFFER, scene_buffer);
+    gl.renderbufferStorageMultisample(gl.RENDERBUFFER, 4, gl.RGBA8,
+        canvas.width, canvas.height);
+
+    scene_depth = gl.createRenderbuffer();
+    gl.bindRenderbuffer(gl.RENDERBUFFER, scene_depth);
+    gl.renderbufferStorageMultisample(gl.RENDERBUFFER, 4, gl.DEPTH_COMPONENT16,
+        canvas.width, canvas.height);
+
+    scene_framebuffer = gl.createFramebuffer();
+    gl.bindFramebuffer(gl.FRAMEBUFFER, scene_framebuffer);
+    gl.framebufferRenderbuffer(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.RENDERBUFFER, scene_buffer);
+    gl.framebufferRenderbuffer(gl.FRAMEBUFFER, gl.DEPTH_ATTACHMENT, gl.RENDERBUFFER, scene_depth);
+
+    resolve_texture = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_2D, resolve_texture);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA,
+        canvas.width, canvas.height, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+
+    resolve_framebuffer = gl.createFramebuffer();
+    gl.bindFramebuffer(gl.FRAMEBUFFER, resolve_framebuffer);
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, resolve_texture, 0);
+
+    if (gl.getError() != gl.NO_ERROR) { throw "Scene framebuffer creation error"; }
+
+    //***** Set up rectanguloid display texture/framebuffer *****//
     monitor_texture = gl.createTexture();
+    gl.activeTexture(gl.TEXTURE3);
     gl.bindTexture(gl.TEXTURE_2D, monitor_texture);
     gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, 512, 512, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
@@ -879,9 +957,7 @@ function initGL() {
     gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D,
         monitor_texture, 0);
 
-    if (gl.getError() != gl.NO_ERROR) {
-        throw "Framebuffer creation error";
-    }
+    if (gl.getError() != gl.NO_ERROR) { throw "Monitor framebuffer creation error"; }
 
     gl.activeTexture(gl.TEXTURE0);
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
@@ -918,7 +994,7 @@ async function init() {
         const canvas_options = {
             alpha: false,
             depth: true,
-            antialias: true
+            antialias: false
         };
         gl = canvas.getContext('webgl2', canvas_options)
             || canvas.getContext('webgl', canvas_options);
@@ -940,45 +1016,82 @@ async function init() {
     document.addEventListener("keydown", keyListener, false);
 }
 
-function saveMonitorTextureAsImage() {
-    const width = 512;
-    const height = 512;
+/**
+ * Save the contents of a texture or color renderbuffer as a PNG image.
+ *
+ * Generated by ChatGPT
+ *
+ * @param {WebGLTexture|WebGLRenderbuffer} source   The texture or renderbuffer to read from.
+ * @param {number} width                           Width, in pixels.
+ * @param {number} height                          Height, in pixels.
+ * @param {"texture"|"renderbuffer"} [type="texture"]
+ *        Use "texture" for TEXTURE_2D or "renderbuffer" for a color renderbuffer.
+ *
+ * @returns {string} dataURL of the image (also triggers a download)
+ */
+function saveAttachmentAsImage(source, width, height, type = "texture") {
+    //prepare an FBO and attach the provided source
+    const tmpFBO = gl.createFramebuffer();
+    gl.bindFramebuffer(gl.FRAMEBUFFER, tmpFBO);
 
-    // 1. Bind the framebuffer that rendered into monitor_texture
-    gl.bindFramebuffer(gl.FRAMEBUFFER, monitor_framebuffer);
+    if (type === "texture") {
+        gl.framebufferTexture2D(
+            gl.FRAMEBUFFER,
+            gl.COLOR_ATTACHMENT0,
+            gl.TEXTURE_2D,
+            source,
+            0
+        );
+    } else if (type === "renderbuffer") {
+        gl.framebufferRenderbuffer(
+            gl.FRAMEBUFFER,
+            gl.COLOR_ATTACHMENT0,
+            gl.RENDERBUFFER,
+            source
+        );
+    } else {
+        throw new Error(`Unknown attachment type: ${type}`);
+    }
 
-    // 2. Read pixels from GPU into CPU memory
+    const status = gl.checkFramebufferStatus(gl.FRAMEBUFFER);
+    if (status !== gl.FRAMEBUFFER_COMPLETE) {
+        console.error("Framebuffer incomplete:", status.toString(16));
+        gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+        gl.deleteFramebuffer(tmpFBO);
+        return null;
+    }
+
+    //read pixels
     const pixels = new Uint8Array(width * height * 4);
     gl.readPixels(0, 0, width, height, gl.RGBA, gl.UNSIGNED_BYTE, pixels);
 
-    // 3. Create a 2D canvas to draw the pixels
-    const canvas2D = document.createElement('canvas');
+    //draw into a 2D canvas (flip Y)
+    const canvas2D = document.createElement("canvas");
     canvas2D.width = width;
     canvas2D.height = height;
-    const ctx = canvas2D.getContext('2d');
+    const ctx = canvas2D.getContext("2d");
 
-    // 4. WebGL origin is bottom-left; Canvas origin is top-left.
-    // We must flip the rows vertically.
     const imageData = ctx.createImageData(width, height);
     for (let y = 0; y < height; y++) {
         const srcStart = (height - y - 1) * width * 4;
         const destStart = y * width * 4;
-        imageData.data.set(pixels.subarray(srcStart, srcStart + width * 4), destStart);
+        imageData.data.set(
+            pixels.subarray(srcStart, srcStart + width * 4),
+            destStart
+        );
     }
-
     ctx.putImageData(imageData, 0, 0);
 
-    // 5. Convert the canvas to a data URL (or Blob)
+    //export as PNG and optionally download
     const dataURL = canvas2D.toDataURL("image/png");
-
-    // (optional) trigger download
-    const link = document.createElement('a');
-    link.download = 'monitor_texture.png';
+    const link = document.createElement("a");
+    link.download = "attachment.png";
     link.href = dataURL;
     link.click();
 
-    // Unbind framebuffer so we don't mess up rendering
+    //clean up
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    gl.deleteFramebuffer(tmpFBO);
 
     return dataURL;
 }
